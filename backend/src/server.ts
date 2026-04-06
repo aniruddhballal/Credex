@@ -4,6 +4,8 @@ import cors from 'cors'
 import mongoose from 'mongoose'
 import cookieParser from 'cookie-parser'
 import authRoutes from './routes/auth.routes'
+import userRoutes from './routes/user.routes'
+import companyRoutes from './routes/company.routes'
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist'
 
 const app = express()
@@ -19,6 +21,8 @@ app.use(cookieParser())
 
 // Routes
 app.use('/api/auth', authRoutes)
+app.use('/api/users', userRoutes)
+app.use('/api/companies', companyRoutes)
 
 // Admin routes — IP restricted (placeholder, routes added later)
 app.use('/api/admin', ipWhitelistMiddleware)
