@@ -572,8 +572,15 @@ Indexes:
 
 ### 9. Document
 
-Purpose: Metadata for uploaded KYC/loan documents. File lives in AWS S3.
-No file content stored in MongoDB — only metadata + S3 key.
+Purpose: Metadata for uploaded KYC/loan documents.
+File content lives in external storage — never in MongoDB.
+
+Current provider: **Backblaze B2** (S3-compatible, free 10GB tier).
+Future provider: **AWS S3 + KMS** (swap when billing is available — near-zero code change).
+
+The `storageProvider` field ensures old documents remain accessible after migration.
+Never expose `storageKey` or `storageBucket` to the client. Always generate signed URLs
+server-side and return only those. Signed URLs expire in 15 minutes.
 
 ```typescript
 interface IDocument {
@@ -598,9 +605,10 @@ interface IDocument {
   fileSize: number                       // bytes
   mimeType: string                       // e.g. 'application/pdf', 'image/jpeg'
 
-  // S3 storage (never expose s3Key to client directly)
-  s3Key: string                          // full S3 object key
-  s3Bucket: string
+  // Storage (provider-agnostic — never expose to client)
+  storageProvider: 'backblaze' | 's3'   // 'backblaze' for V1; 's3' after migration
+  storageKey: string                     // full object key within the bucket
+  storageBucket: string                  // bucket name
 
   // Status
   status: 'uploaded' | 'under_review' | 'accepted' | 'rejected'
@@ -624,6 +632,7 @@ Indexes:
   uploadedBy
   documentType
   status
+  storageProvider                        // useful when running a migration job
   isDeleted
 ```
 
@@ -1003,12 +1012,19 @@ lives in one collection with reviewType distinguishing them. This makes it easie
 - Query all reviews for a company across both directions
 - Aggregate product ratings from the same source of truth
 
-### Why Document uses S3Key not GridFS
-LOANlo used GridFS (MongoDB's file storage). S3 + KMS is the production-grade choice:
-- Signed expiring URLs (15-30 min) — files never directly accessible
-- KMS encryption at rest — mandatory for financial documents
-- Access logging via S3 server access logs + DocumentAccessLog collection
-- GridFS is fine for dev but creates operational complexity at scale
+### Why Document uses external storage not GridFS
+
+LOANlo used GridFS (MongoDB's built-in file storage). Credex uses external object storage
+for the following reasons:
+- **Signed expiring URLs** — files are never directly accessible; every view goes through
+  the backend which generates a 15-minute signed URL and writes a DocumentAccessLog entry
+- **Provider-agnostic design** — `storageProvider` field means V1 uses Backblaze B2
+  (free, S3-compatible) and migrates to AWS S3 + KMS when billing is available.
+  The S3 SDK works with both — only the endpoint and credentials change.
+- **GridFS at scale** — creates operational complexity (chunking, reassembly) that
+  external object storage handles transparently
+- **Separation of concerns** — MongoDB stores metadata and relationships;
+  object storage handles binary files. Each does what it's best at.
 
 ---
 
