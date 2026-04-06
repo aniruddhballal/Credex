@@ -26,97 +26,127 @@ The three old deployments remain live independently.
 
 ---
 
-## Phase 0 — Schema Design & Project Setup
-**Time estimate: 1–2 weeks**
-**Do this before writing any feature code**
+## Phase 0 — Schema Design & Project Setup ✅ COMPLETE
 
-This is the most important phase. The unified MongoDB schema is the backbone of everything.
-
-### Unified MongoDB Collections
-
-```
-users                    Core identity — all roles (buyer, supplier, underwriter, admin)
-companies                Company/org profile linked to user(s)
-products                 Supplier listings
-rfqs                     Buyer requests (Request for Quotation)
-purchase_orders          Confirmed exchanges (PO) — links buyer, supplier, product
-payments                 Payment records linked to POs (partial, full, deferred)
-loan_applications        Linked to POs and buyer company
-loan_documents           KYC documents linked to loan applications
-document_access_logs     Every document view — who, when (from LOANlo)
-reviews                  Post-PO reviews — buyer reviews supplier and vice versa
-notifications            All notification events per user
-sessions                 Active login sessions (from LOANlo)
-login_audit              Login history with IP, device (from LOANlo)
-audit_logs               Every mutation — actor, action, timestamp, IP (from LOANlo)
-credit_scores            Computed scores per company, versioned over time
-chat_messages            In-platform chat linked to RFQ or PO
-```
-
-### Tasks
-- [ ] Design full schema for each collection with all fields, types, indexes
-- [ ] Define relationships (which fields reference which other collections)
-- [ ] Define soft delete strategy (deletedAt field on all major collections)
-- [ ] Set up new MongoDB Atlas cluster for Credex
-- [ ] Set up new GitHub repository (monorepo or separate frontend/backend/ml repos)
-- [ ] Set up project structure for all three services:
-  - `/frontend` — Next.js
+- [x] Design full schema for all 17 collections
+- [x] Define relationships, soft delete strategy, indexes
+- [x] MongoDB Atlas cluster set up for Credex
+- [x] GitHub repository set up
+- [x] Project structure created:
   - `/backend` — Node + Express + TypeScript
-  - `/ml-service` — Python + FastAPI
+  - `/frontend` — Next.js (not started yet)
+  - `/ml-service` — Python + FastAPI (not started yet)
 
 ---
 
-## Phase 1 — Backend Foundation
-**Time estimate: 3–4 weeks**
-**Build the API before the UI**
+## Phase 1 — Backend Foundation 🔄 IN PROGRESS
 
-Start with the Node backend. This is where LOANlo's architecture is most reusable.
+**Completed batch by batch:**
 
-### Auth & Users (carry from LOANlo, extend for new roles)
-- [ ] User model with roles: buyer, supplier, underwriter, system_admin
-- [ ] JWT-based auth (access token + refresh token)
-- [ ] Register, login, logout endpoints
-- [ ] OTP via email (Gmail API + OAuth2 — carry from LOANlo)
-- [ ] Password reset (token-based — carry from LOANlo)
-- [ ] Session model — track all active sessions per user (carry from LOANlo)
-- [ ] Auto-logout after 15 min inactivity (carry from LOANlo)
-- [ ] Remote session termination (carry from LOANlo)
-- [ ] IP allowlisting middleware for system_admin routes
-- [ ] Role-based route protection middleware (RBAC)
-- [ ] Audit log middleware — log every mutation with actor + IP (carry from LOANlo)
-- [ ] XSS sanitisation middleware (carry from LOANlo)
-- [ ] Input validation layer
+### Auth & Users ✅
+- [x] User model (`models/User.ts`)
+- [x] Session model (`models/Session.ts`)
+- [x] AuditLog model (`models/AuditLog.ts`)
+- [x] JWT utilities (`utils/jwt.ts`)
+- [x] Email utilities (`utils/email.ts`) — Gmail OAuth2
+- [x] Auth middleware (`middleware/auth.ts`) — JWT verify + session check + inactivity timeout
+- [x] Sanitise middleware (`middleware/sanitise.ts`) — xss library
+- [x] IP whitelist middleware (`middleware/ipWhitelist.ts`)
+- [x] Auth controller (`controllers/auth.controller.ts`)
+- [x] Auth routes (`routes/auth.routes.ts`)
+- [x] server.ts wired up
+- [x] .env.example created
 
-### Company & Supplier Profiles
-- [ ] Company model (linked to user)
-- [ ] CRUD endpoints for company profile
-- [ ] Profile picture upload (AWS S3, replace Cloudinary)
+**Auth endpoints live:**
+```
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/refresh
+GET  /api/auth/verify-email?token=...
+POST /api/auth/forgot-password
+POST /api/auth/reset-password
+POST /api/auth/logout
+GET  /api/auth/me
+```
 
-### Products & Listings
-- [ ] Product model (linked to supplier/company)
-- [ ] CRUD endpoints for product listings
-- [ ] Image upload to S3
-- [ ] Product search endpoint (text search + filters: category, location, rating,
-      financing options accepted)
+### Company & User Profiles ✅
+- [x] Company model (`models/Company.ts`)
+- [x] User controller (`controllers/user.controller.ts`)
+- [x] Company controller (`controllers/company.controller.ts`)
+- [x] User routes (`routes/user.routes.ts`)
+- [x] Company routes (`routes/company.routes.ts`)
 
-### RFQ & Purchase Orders
-- [ ] RFQ model + endpoints (create, view, counter, accept, reject)
-- [ ] PO model + endpoints (created on RFQ acceptance)
-- [ ] PO includes: financing method, payment deadline, penalty rate, status
-- [ ] Payment model + endpoints (record partial/full payments against PO)
-- [ ] Status transitions: rfq_pending → rfq_countered → rfq_accepted → po_active
-  → payment_pending → partially_paid → paid → completed
+**Profile endpoints live:**
+```
+GET    /api/users/profile
+PATCH  /api/users/profile
+POST   /api/users/change-password
 
-### Reviews
-- [ ] Review model + endpoints
-- [ ] Enforce: review only unlocks after PO status = completed
-- [ ] Aggregate rating computation for products, suppliers, buyers
+POST   /api/companies                  create + link to account
+GET    /api/companies/me/profile
+PATCH  /api/companies/me/profile
+GET    /api/companies/:id              public profile
+GET    /api/companies                  paginated listing (?type=supplier&city=Mumbai&search=steel)
+```
 
-### Email Notifications (carry Gmail API + OAuth2 from LOANlo)
-- [ ] Notification triggers for every status change:
-  RFQ received, counter made, PO confirmed, payment due (3 days before),
-  payment received, review posted, account verified
-- [ ] Modular email template system (extend LOANlo's template architecture)
+### Products & Listings ✅
+- [x] Product model (`models/Product.ts`)
+- [x] Product controller (`controllers/product.controller.ts`)
+- [x] Product routes (`routes/product.routes.ts`)
+
+**Product endpoints live:**
+```
+GET    /api/products                   public listing with filters + cursor pagination
+GET    /api/products/:id               public product detail
+GET    /api/products/my/listings       supplier's own products
+POST   /api/products                   create (supplier only)
+PATCH  /api/products/:id               update (owner only)
+DELETE /api/products/:id               soft delete (owner only)
+```
+
+### RFQ & Negotiation ✅
+- [x] RFQ model (`models/RFQ.ts`)
+- [x] Notification model (`models/Notification.ts`)
+- [x] RFQ controller (`controllers/rfq.controller.ts`)
+- [x] RFQ routes (`routes/rfq.routes.ts`)
+
+**RFQ endpoints live:**
+```
+GET   /api/rfqs                        your RFQs (?role=buyer|supplier&status=pending)
+GET   /api/rfqs/:id                    full detail with negotiation history
+POST  /api/rfqs                        buyer creates RFQ
+POST  /api/rfqs/:id/counter            counter with new terms
+POST  /api/rfqs/:id/accept             accept current terms
+POST  /api/rfqs/:id/decline            decline
+```
+
+### Purchase Orders & Payments ✅
+- [x] PurchaseOrder model (`models/PurchaseOrder.ts`)
+- [x] Payment model (`models/Payment.ts`)
+- [x] PO controller (`controllers/purchaseOrder.controller.ts`)
+- [x] Payment controller (`controllers/payment.controller.ts`)
+- [x] PO routes (`routes/purchaseOrder.routes.ts`)
+
+**PO + Payment endpoints live:**
+```
+GET   /api/purchase-orders             your POs (filtered)
+GET   /api/purchase-orders/:id         full detail
+POST  /api/purchase-orders             create from accepted RFQ { rfqId }
+PATCH /api/purchase-orders/:id/fulfilment   supplier updates fulfilment
+POST  /api/purchase-orders/:id/cancel
+
+POST  /api/purchase-orders/:id/payments    buyer records payment
+GET   /api/purchase-orders/:id/payments    payment history
+```
+
+### Still To Do In Phase 1
+- [ ] Review model + endpoints (unlocks after PO completes)
+- [ ] Aggregate rating updates on Product + Company on review submission
+- [ ] Payment due reminder cron job (3 days before deadline)
+- [ ] RFQ expiry cron job (mark expired RFQs daily)
+- [ ] In-platform notifications endpoint (GET /api/notifications, PATCH read)
+- [ ] Chat model + endpoints (linked to RFQ or PO)
+- [ ] S3 image upload for products and company logos (currently missing)
 
 ---
 
@@ -277,38 +307,33 @@ Start with the Node backend. This is where LOANlo's architecture is most reusabl
 
 ---
 
-## Summary Timeline
+## Timeline (Revised)
 
-| Phase | What | Estimate |
-|---|---|---|
-| 0 | Schema design + project setup | 1–2 weeks |
-| 1 | Backend foundation (auth, profiles, marketplace, RFQs, POs, payments, email) | 3–4 weeks |
-| 2 | Loan marketplace + document vault | 2–3 weeks |
-| 3 | Python ML microservice (optimizer + credit risk + credit score) | 2–3 weeks |
-| 4 | Next.js frontend (all roles + admin) | 4–6 weeks |
-| 5 | Integration testing + security hardening | 2–3 weeks |
-| 6 | Deployment | 1 week |
-| **Total** | | **~15–22 weeks** |
-
----
-
-## What To Build First (Within Phase 1)
-
-If you start tomorrow, this is the order:
-
-1. Set up monorepo structure and MongoDB schema (Phase 0)
-2. Auth system — users, roles, JWT, sessions, OTP email (Phase 1)
-3. Company + supplier profiles (Phase 1)
-4. Product listings CRUD (Phase 1)
-5. RFQ → PO → payment flow (Phase 1)
-6. FastAPI microservice skeleton + optimizer port (Phase 3, can run in parallel)
-
-The frontend comes after the APIs exist.
-The optimizer connects to real data after the PO system works.
-The loan system connects to POs after both exist.
+| Phase | What | Status | Estimate Remaining |
+|---|---|---|---|
+| 0 | Schema + setup | ✅ Done | — |
+| 1 | Backend foundation | 🔄 ~70% done | 1–2 weeks |
+| 2 | Loan marketplace + document vault | ⏳ | 2–3 weeks |
+| 3 | Python ML microservice | ⏳ | 2–3 weeks |
+| 4 | Next.js frontend | ⏳ | 4–6 weeks |
+| 5 | Testing + hardening | ⏳ | 2–3 weeks |
+| 6 | Deployment | ⏳ | 1 week |
+| **Total remaining** | | | **~12–18 weeks** |
 
 ---
 
+## What To Build Next (Immediate)
+
+Phase 1 is ~70% done. Complete it before moving to Phase 2.
+
+**Next batch to build:**
+1. Review model + controller + routes
+2. Notification read endpoint (GET + PATCH)
+3. Chat model + controller + routes
+4. S3 image upload (products + company logos)
+5. Cron jobs (payment due reminders + RFQ expiry)
+
+Then Phase 2 starts: LoanType → LoanApplication → Document vault → Underwriter flow.
 ## The One Thing To Remember
 
 > The cash flow optimizer and credit scoring engine are Credex's moat.
