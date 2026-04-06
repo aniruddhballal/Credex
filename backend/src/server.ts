@@ -11,6 +11,8 @@ import rfqRoutes from './routes/rfq.routes'
 import purchaseOrderRoutes from './routes/purchaseOrder.routes'
 import loanRoutes from './routes/loan.routes'
 import notificationRoutes from './routes/notification.routes'
+import reviewRoutes from './routes/review.routes'
+import chatRoutes from './routes/chat.routes'
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist'
 
 const app = express()
@@ -33,6 +35,8 @@ app.use('/api/rfqs', rfqRoutes)
 app.use('/api/purchase-orders', purchaseOrderRoutes)
 app.use('/api/loans', loanRoutes)
 app.use('/api/notifications', notificationRoutes)
+app.use('/api/reviews', reviewRoutes)
+app.use('/api/chat', chatRoutes)
 
 // Admin routes — IP restricted (placeholder, routes added later)
 app.use('/api/admin', ipWhitelistMiddleware)
