@@ -39,7 +39,7 @@ The three old deployments remain live independently.
 
 ---
 
-## Phase 1 — Backend Foundation 🔄 IN PROGRESS
+## Phase 1 — Backend Foundation ✅ COMPLETE
 
 **Completed batch by batch:**
 
@@ -140,42 +140,32 @@ GET   /api/purchase-orders/:id/payments    payment history
 ```
 
 ### Still To Do In Phase 1
-- [ ] Review model + endpoints (unlocks after PO completes)
-- [ ] Aggregate rating updates on Product + Company on review submission
-- [ ] Payment due reminder cron job (3 days before deadline)
-- [ ] RFQ expiry cron job (mark expired RFQs daily)
-- [ ] In-platform notifications endpoint (GET /api/notifications, PATCH read)
-- [ ] Chat model + endpoints (linked to RFQ or PO)
-- [ ] S3 image upload for products and company logos (currently missing)
+- [x] Review model + endpoints
+- [x] Aggregate rating updates on Product + Company on review submission
+- [x] Payment due reminder cron job (3 days before deadline)
+- [x] RFQ expiry cron job
+- [x] In-platform notifications endpoint
+- [x] Chat model + endpoints
+- [x] S3 image upload (Cloudinary for images, Backblaze B2 for documents)
 
 ---
 
-## Phase 2 — Loan & Document Vault (carry from LOANlo)
-**Time estimate: 2–3 weeks**
-**Most of this logic already exists — port and adapt**
+## Phase 2 — Loan & Document Vault ✅ COMPLETE
 
-### Loan Applications
-- [ ] Loan application model (linked to PO + buyer company)
-- [ ] Multi-step application form endpoints
-- [ ] Loan types: working capital, LAP, invoice discounting, others
-- [ ] Loan status state machine (carry from LOANlo):
-  pending → under_review → approved / rejected / request_documents → pending
-- [ ] Underwriter actions: approve, reject, request additional documents
-
-### Document Vault (upgrade from LOANlo)
-- [ ] Migrate from LOANlo's storage to AWS S3 + KMS
-- [ ] Signed expiring URLs only (no public S3 links)
-- [ ] Document type tagging (GST, PAN, incorporation cert, ITR, bank statements, etc.)
-- [ ] document_access_logs — every view recorded (carry from LOANlo)
-- [ ] Conflict resolution: handle concurrent document actions by applicant + underwriter
-
-### Email Notifications for Loans
-- [ ] Application submitted, under review, approved, rejected,
-      documents requested, documents uploaded, restoration (carry from LOANlo)
+- [x] LoanType model + admin CRUD
+- [x] LoanApplication model + multi-step application endpoints
+- [x] Document model (Backblaze B2 metadata)
+- [x] B2 upload with signed expiring URLs
+- [x] DocumentAccessLog model + write on every view
+- [x] Underwriter dashboard endpoints (view queue, review, approve/reject/request docs)
+- [x] Loan status state machine enforcement
+- [x] Credit risk score call to Python service on loan submission
+- [x] Loan email notifications
+- [x] RestorationRequest model + endpoints
 
 ---
 
-## Phase 3 — Python ML Microservice
+## Phase 3 — Python ML Microservice 🔄 NEXT
 **Time estimate: 2–3 weeks**
 **Port VenPayRL engine to Python; integrate LOANlo's credit risk model**
 
@@ -208,7 +198,7 @@ GET   /api/purchase-orders/:id/payments    payment history
 
 ---
 
-## Phase 4 — Frontend (Next.js)
+## Phase 4 — Frontend (Next.js) ⏳ NOT STARTED
 **Time estimate: 4–6 weeks**
 **Build after backend APIs are stable**
 
@@ -267,7 +257,7 @@ GET   /api/purchase-orders/:id/payments    payment history
 
 ---
 
-## Phase 5 — Integration, Testing & Hardening
+## Phase 5 — Integration Testing & Hardening ⏳ NOT STARTED
 **Time estimate: 2–3 weeks**
 
 - [ ] End-to-end flow testing: register → list product → RFQ → negotiate →
@@ -291,7 +281,7 @@ GET   /api/purchase-orders/:id/payments    payment history
 
 ---
 
-## Phase 6 — Deployment
+## Phase 6 — Deployment ⏳ NOT STARTED
 **Time estimate: 1 week**
 
 - [ ] Frontend: Vercel (Next.js)
@@ -312,33 +302,50 @@ GET   /api/purchase-orders/:id/payments    payment history
 | Phase | What | Status | Estimate Remaining |
 |---|---|---|---|
 | 0 | Schema + setup | ✅ Done | — |
-| 1 | Backend foundation | 🔄 ~70% done | 1–2 weeks |
-| 2 | Loan marketplace + document vault | ⏳ | 2–3 weeks |
-| 3 | Python ML microservice | ⏳ | 2–3 weeks |
+| 1 | Backend foundation | ✅ Done | — |
+| 2 | Loan marketplace + document vault | ✅ Done | — |
+| 3 | Python ML microservice | 🔄 Next | 2–3 weeks |
 | 4 | Next.js frontend | ⏳ | 4–6 weeks |
 | 5 | Testing + hardening | ⏳ | 2–3 weeks |
 | 6 | Deployment | ⏳ | 1 week |
-| **Total remaining** | | | **~12–18 weeks** |
+| **Total remaining** | | | **~9–13 weeks** |
 
 ---
 
-## What To Build Next (Immediate)
+## What To Build Next
 
-Phase 1 is ~70% done. Complete it before moving to Phase 2.
+**Backend is 100% complete. All 17 models written. All routes live.**
 
-**Next batch to build:**
-1. Review model + controller + routes
-2. Notification read endpoint (GET + PATCH)
-3. Chat model + controller + routes
-4. S3 image upload (products + company logos)
-5. Cron jobs (payment due reminders + RFQ expiry)
+Full backend route map:
+```
+/api/auth           register, login, refresh, verify-email, forgot/reset-password, logout, me
+/api/users          profile, update, change-password
+/api/companies      create, get, update, list
+/api/products       CRUD, search + filters
+/api/rfqs           create, counter, accept, decline, list, get
+/api/purchase-orders create, get, list, fulfilment, cancel, payments
+/api/loans          create, submit, assign, request-docs, approve, reject
+/api/notifications  list, mark-read, mark-all-read
+/api/reviews        submit, list
+/api/chat           send, get thread
+/api/documents      upload, signed URL, list, accept, reject, delete
+/api/images         profile pic, company logo, product images
+/api/credit-scores  me, me/history, compute, company/:id (admin)
+/api/admin          users, companies/verify, loan-types CRUD,
+                    restoration-requests, audit-logs
+```
 
-Then Phase 2 starts: LoanType → LoanApplication → Document vault → Underwriter flow.
-## The One Thing To Remember
+**Phase 3 is next: Python ML microservice (`/ml-service`)**
 
-> The cash flow optimizer and credit scoring engine are Credex's moat.
-> But they are useless without real PO and payment data.
-> Build the marketplace first. The intelligence follows.
+Build order within Phase 3:
+1. FastAPI project setup + health check endpoint
+2. Port VenPayRL agents to Python (rule, heuristic, Q-table, DQN)
+3. POST /optimize — cash flow optimizer (reads real PO data, returns schedule)
+4. POST /credit-risk — XGBoost model from LOANlo (port .pkl file)
+5. POST /credit-score — 300–900 score computation
+6. Wire Node backend proxy routes to Python service
+
+Then Phase 4: Next.js frontend.
 
 ---
 
