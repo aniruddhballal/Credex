@@ -207,7 +207,7 @@ export const updateMyCompany = async (req: AuthRequest, res: Response): Promise<
       udyamNumber, industry, tags,
     }
     Object.entries(updatable).forEach(([key, val]) => {
-      if (val !== undefined) (company as Record<string, unknown>)[key] = val
+      if (val !== undefined) company.set(key, val)
     })
 
     await company.save()
@@ -220,7 +220,7 @@ export const updateMyCompany = async (req: AuthRequest, res: Response): Promise<
       entityType: 'Company',
       entityId: company._id,
       changes: Object.fromEntries(
-        Object.entries(before).map(([k, v]) => [k, { before: v, after: (company as Record<string, unknown>)[k] }])
+        Object.entries(before).map(([k, v]) => [k, { before: v, after: company.get(k) }])
       ),
       timestamp: new Date(),
     }).catch(() => { })

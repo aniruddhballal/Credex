@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
 import { Types } from 'mongoose'
-import RFQ from '../models/RFQ'
+import RFQ, { INegotiationEntry } from '../models/RFQ'
 import Product from '../models/Product'
 import User from '../models/User'
 import Company from '../models/Company'
@@ -164,7 +164,7 @@ export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void>
     }
 
     // Cannot counter your own last move
-    const moverRole = isBuyer ? 'buyer' : 'supplier'
+    const moverRole: INegotiationEntry['by'] = isBuyer ? 'buyer' : 'supplier'
     if (rfq.lastMovedBy === moverRole) {
       res.status(400).json({ success: false, message: 'Waiting for the other party to respond' })
       return
@@ -181,7 +181,7 @@ export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void>
     const newDeadline = paymentDeadlineDays ?? rfq.currentPaymentDeadlineDays
     const newPenalty = penaltyRate ?? rfq.currentPenaltyRate
 
-    const entry = {
+    const entry: INegotiationEntry = {
       by: moverRole,
       byUserId: new Types.ObjectId(req.user!.userId),
       proposedPrice: newPrice,
