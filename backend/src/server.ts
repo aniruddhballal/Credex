@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.routes'
 import userRoutes from './routes/user.routes'
 import companyRoutes from './routes/company.routes'
 import productRoutes from './routes/product.routes'
+import rfqRoutes from './routes/rfq.routes'
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist'
 
 const app = express()
@@ -25,6 +26,7 @@ app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/companies', companyRoutes)
 app.use('/api/products', productRoutes)
+app.use('/api/rfqs', rfqRoutes)
 
 // Admin routes — IP restricted (placeholder, routes added later)
 app.use('/api/admin', ipWhitelistMiddleware)
