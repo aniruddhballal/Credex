@@ -14,6 +14,9 @@ import notificationRoutes from './routes/notification.routes'
 import reviewRoutes from './routes/review.routes'
 import chatRoutes from './routes/chat.routes'
 import documentRoutes from './routes/document.routes'
+import imageRoutes from './routes/image.routes'
+import creditScoreRoutes from './routes/creditScore.routes'
+import adminRoutes from './routes/admin.routes'
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist'
 
 const app = express()
@@ -27,7 +30,7 @@ app.use(cors({
 app.use(express.json())
 app.use(cookieParser())
 
-// Routes
+// Public + authenticated routes
 app.use('/api/auth', authRoutes)
 app.use('/api/users', userRoutes)
 app.use('/api/companies', companyRoutes)
@@ -39,9 +42,11 @@ app.use('/api/notifications', notificationRoutes)
 app.use('/api/reviews', reviewRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/documents', documentRoutes)
+app.use('/api/images', imageRoutes)
+app.use('/api/credit-scores', creditScoreRoutes)
 
-// Admin routes — IP restricted (placeholder, routes added later)
-app.use('/api/admin', ipWhitelistMiddleware)
+// Admin routes — IP-whitelisted at middleware level before any handler runs
+app.use('/api/admin', ipWhitelistMiddleware, adminRoutes)
 
 app.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
