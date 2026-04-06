@@ -1,121 +1,100 @@
-# Open Questions — B2B Procurement & Trade Finance Platform
+# Open Questions — Credex
 
-These are the questions that need answers before a full product/technical specification can be written. They are grouped by theme and roughly prioritised — the ones at the top have the biggest downstream impact on everything else.
+These are the genuinely unresolved questions before or during the build.
+Many earlier questions are now answered by the existing three products.
+This is the trimmed, current list.
 
 ---
 
-## 🔴 Priority 1 — Answer These First (Everything Else Depends On Them)
+## 🔴 Priority 1 — Resolve Before Architecture Is Finalised
+
+### Money Flow (Most Critical)
+1. When a buyer pays a supplier on Credex, does money **pass through the platform**,
+   or does the platform only **track the obligation** while parties pay each other directly?
+2. If money passes through the platform: are you prepared to partner with a licensed
+   payment aggregator (Razorpay, Cashfree) to handle this? Or is tracking-only acceptable for V1?
+3. When a bank approves a loan via Credex, does the disbursed amount go to the **buyer**,
+   or **directly to the supplier** on the buyer's behalf?
+
+### Regulatory
+4. Have you (or will you before launch) spoken to a lawyer about RBI's LSP/DSA
+   registration requirement for operating a loan marketplace?
+5. Are you aware of DPDP Act 2023 obligations — data deletion requests, retention policy,
+   breach notification? Will you implement these in the build?
+
+---
+
+## 🟠 Priority 2 — Needed Before First User Is Onboarded
 
 ### Target User
-1. What **size of company** are you targeting — early-stage startups, SMEs (₹5–50Cr revenue), mid-market enterprises, large corporates?
-2. What **industry or sector** is the primary focus — raw materials, manufacturing, services, SaaS, construction, FMCG, something else?
-3. What **geography** are you launching in first — one city, one state, pan-India?
-4. Is there a specific type of buyer or supplier you want to onboard first to prove the model?
+6. What **size of company** are you targeting first — micro businesses, SMEs, mid-market?
+7. What **industry or sector** is the primary focus at launch?
+8. What **geography** — one city, one state, or pan-India from day one?
 
-### How Money Actually Moves
-5. When a buyer pays a supplier, does money **pass through your platform**, or does the platform only **track the obligation** while parties pay each other directly?
-6. If money passes through the platform (even temporarily), are you prepared for the **RBI payment aggregator licensing** requirement?
-7. Are you planning to **partner with a licensed payment aggregator** (e.g. Razorpay, Cashfree) rather than obtain your own license?
-8. When a bank approves a loan, does the money go **to the buyer**, or **directly to the supplier** on the buyer's behalf?
-
-### Business Model — How Does the Platform Make Money?
-9. Will suppliers pay a **subscription or listing fee** to be on the platform?
-10. Will the platform take a **transaction fee / commission** on confirmed orders?
-11. Will the platform earn a **referral or origination fee** from banks when a loan is approved?
-12. Is the **cash flow optimiser** a free feature or a **paid/premium feature**?
-13. Is there a **freemium model** — basic access free, advanced finance features paid?
-
----
-
-## 🟠 Priority 2 — Needed Before Build Starts
+### Business Model
+9. How does Credex make money?
+   Options: transaction fee on POs, supplier subscription/listing fee,
+   loan referral/origination fee from banks, premium features (optimizer as paid tier),
+   or a combination.
+10. Is the cash flow optimizer a **free feature for all buyers** or a **paid/premium feature**?
 
 ### Dispute Resolution
-14. If a buyer says the supplier delivered defective goods, who arbitrates? Is there an in-platform dispute process?
-15. If a buyer disputes a penalty clause they claim they didn't agree to, how is that resolved?
-16. If a loan is approved but the underlying order falls through, what happens to the loan?
-17. Can a supplier appeal a negative review they believe is unfair? Who reviews such appeals?
-18. What is the maximum time allowed for dispute resolution before escalation?
+11. If a buyer claims a supplier delivered defective goods — is there an in-platform
+    dispute process, or are parties left to resolve it themselves?
+12. Can a supplier appeal a negative review they believe is unfair?
+13. What is the consequence of a missed payment deadline beyond a credit score impact?
+    Is there a collections escalation path?
 
 ### Onboarding & Verification
-19. What documents do you collect from a buyer at signup? (GST, PAN, incorporation certificate, bank statements, ITR?)
-20. What documents do you collect from a supplier at signup?
-21. Is verification **manual** (your team reviews), **automated** (via KYC APIs like Karza, Setu, Perfios), or a **combination**?
-22. What can an **unverified user** do on the platform vs a **verified user**?
-23. How long is the expected verification turnaround, and what happens during the waiting period?
-24. What criteria does a user need to meet to earn the **trust badge / green tick**?
-
-### Default & Non-Payment Consequences
-25. If a buyer misses a payment deadline, what happens automatically on the platform?
-26. Is there a **grace period** before a penalty kicks in, or is it immediate?
-27. Does a missed payment immediately impact the buyer's credit score?
-28. Can a supplier initiate a **collections escalation** through the platform?
-29. For bank loans — how is an NPA (Non-Performing Asset) handled on the platform? Does the platform have any liability?
+14. What documents are collected from buyers and suppliers at signup?
+15. Is KYC verification **manual** (you review), **automated** (KYC API like Karza/Setu/Perfios),
+    or a combination?
+16. What can an **unverified user** do on the platform vs a **verified user**?
+17. What specific criteria earn the **trust badge / green tick**?
 
 ---
 
-## 🟡 Priority 3 — Important for Product Quality
+## 🟡 Priority 3 — Decide During Build
 
-### Supplier Discovery & Search
-30. How do buyers find suppliers — keyword search, category browsing, filters (location, rating, price, financing accepted)?
-31. Do you want a **recommendation engine** — "companies like yours also bought from..."?
-32. Do you want a **matching engine** — proactively suggesting suppliers to buyers based on their needs/history?
-33. How do you prevent suppliers from gaming search rankings or listing quality?
-34. Can buyers save or favourite suppliers for repeat orders?
+### Unified Database Schema
+18. Can the **same company be both a buyer and a supplier** on Credex
+    (e.g. a manufacturer who buys raw materials and also sells finished goods)?
+19. If yes — one account with a role toggle, or two separate accounts?
 
-### Notifications & Communication
-35. Beyond email, do you want **WhatsApp Business API** notifications (very high open rates for Indian SMEs)?
-36. Do you want an **in-app notification centre** (bell icon with a feed of updates)?
-37. If you build a mobile app later, do you want **push notifications**?
-38. Are there any notification types that should be **SMS only** (e.g. OTP, urgent payment reminders)?
+### Cash Flow Optimiser
+20. Where does the buyer's **cash inflow forecast** come from in production —
+    manually entered, or integrated with accounting software (Tally, Zoho Books, QuickBooks)?
+21. Should the optimizer run **on-demand** or **automatically on a schedule** (e.g. each morning)?
+22. Should optimizer recommendations be **explainable in plain language**
+    (e.g. "Pay Supplier B today because their penalty kicks in tomorrow and you have
+    sufficient balance after expected inflow from Client X")?
 
-### Cash Flow Optimiser — Data Sources
-39. Where does the buyer's **cash inflow forecast** data come from — manually entered by the user, or integrated with accounting software (Tally, Zoho Books, QuickBooks)?
-40. Does the optimiser run **on-demand** (user clicks "optimise") or **automatically on a schedule** (e.g. every morning)?
-41. Should the optimiser send **proactive alerts** — e.g. "Pay Supplier A today or incur ₹5,000 penalty tomorrow"?
-42. Should the optimiser's recommendations be **explainable** — showing the buyer why it made a particular suggestion?
+### Loan Marketplace
+23. Which lender types do you want on the platform at launch —
+    PSU banks, private banks, NBFCs, or all?
+24. Do you want banks to **bid against each other** for a loan application,
+    or does the buyer pick one bank and apply to them specifically?
+25. Minimum and maximum loan sizes supported?
 
-### Loan & Financing Marketplace
-43. Which types of banks/lenders do you want on the platform — PSU banks, private banks, NBFCs, or all?
-44. Is there a **minimum or maximum loan size** you want to support?
-45. Do you want banks to **bid against each other** for a loan application (marketplace model), or does the buyer pick one bank to apply to?
-46. Who sets the interest rate — the bank, or is it negotiated on-platform?
-47. Are there loan products beyond loans and LAP you want to support at launch — e.g. invoice discounting, supply chain finance, overdraft lines?
+### Notifications
+26. Beyond email — do you want **WhatsApp Business API** for payment reminders?
+27. Do you want an **in-app notification centre** (bell icon + feed) in V1 or later?
 
 ---
 
-## 🟢 Priority 4 — Operational & Compliance Decisions
+## 🟢 Priority 4 — Post-Launch Decisions
 
-### Data, Privacy & Security
-48. Are you aware of and prepared to comply with India's **DPDP Act 2023** (Digital Personal Data Protection Act)?
-49. What is your **data retention policy** — how long do you store documents and transaction records after a user closes their account?
-50. Do you want a **user-facing data deletion request** mechanism (required under DPDP)?
-51. What encryption standards are you targeting — AES-256 at rest, TLS 1.2+ in transit?
-52. Do you have a **breach notification plan** — who gets notified, within what timeframe, if there's a data breach?
-
-### Mobile vs Web
-53. Is the platform **web-only at launch**, or do you want a **mobile app** from day one?
-54. If web-only, should it be fully **mobile-responsive** so it works on phones?
-55. Which user types are most likely to use the platform on a phone — buyers checking payment status, suppliers checking orders, or both?
-
-### Regulatory & Licensing
-56. Have you looked into whether you need to register as a **Loan Service Provider (LSP)** or **Direct Selling Agent (DSA)** under RBI guidelines given the loan marketplace feature?
-57. Do you have a legal/compliance advisor familiar with RBI's fintech regulations?
-58. Are you planning to handle **GST-compliant invoicing** through the platform, or leave that to the parties?
-
-### Supplier & Buyer Can Be the Same Entity
-59. Can the **same company be both a buyer and a supplier** on the platform (e.g. a manufacturer who buys raw materials and also sells finished goods)?
-60. If yes, do they get one account with a toggle, or two separate accounts?
+28. Mobile app (React Native / Flutter) — when, if ever?
+29. Accounting software integrations (Tally, Zoho, QuickBooks) — which first?
+30. International expansion — or India-only for the foreseeable future?
+31. Will Credex ever offer **escrow** (hold buyer funds until delivery confirmed)?
+32. Will there be a **supplier discovery / matchmaking** engine beyond search filters?
 
 ---
 
-## 📝 Notes
+*Note: Questions answered by existing products (VenPay, LOANlo, VenPayRL)
+have been removed from this list. The tech stack, auth architecture, email system,
+session management, admin privileges, ML service architecture, and UI framework
+are all resolved.*
 
-- Questions marked 🔴 should be answered before any wireframing or architecture work begins
-- Questions marked 🟠 should be answered before development starts
-- Questions marked 🟡 and 🟢 can be answered iteratively during the build phase
-- It's okay not to have all answers now — some will become clear once you speak to potential early users
-
----
-
-*Document status: Open — answers to be filled in*
 *Last updated: April 2026*
