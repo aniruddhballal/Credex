@@ -28,11 +28,13 @@ procurement workflows, cash flow complexity, and limited access to formal credit
 
 These are non-negotiable. Do not deviate from these under any circumstance.
 
-1. **Never expose S3 keys or bucket names to the client.** All document access
-   is via signed expiring URLs generated server-side. URLs expire in 15 minutes.
+1. **Never expose storage keys, bucket names, or Cloudinary URLs for private documents
+   to the client directly.** All KYC document access is via signed expiring URLs
+   generated server-side. URLs expire in 15 minutes.
 
-2. **Never store file content in MongoDB.** Files go to AWS S3. MongoDB stores
-   only metadata (s3Key, s3Bucket, mimeType, fileSize, fileName).
+2. **Never store file content in MongoDB.** Files go to external storage (Cloudinary
+   for images, Backblaze B2 for documents). MongoDB stores only metadata
+   (storageKey, storageProvider, mimeType, fileSize, fileName).
 
 3. **Every destructive operation is a soft delete.** Set `isDeleted: true` and
    `deletedAt: Date`. Never use `.deleteOne()` or `.deleteMany()` on major collections
@@ -86,7 +88,11 @@ These are non-negotiable. Do not deviate from these under any circumstance.
 - **Auth:** JWT (jsonwebtoken) — access token (15 min) + refresh token (7 days)
 - **Password hashing:** bcrypt (12 rounds)
 - **Email:** Gmail API with OAuth2 (not SendGrid, not Nodemailer SMTP)
-- **File upload:** Multer (to memory buffer) → AWS SDK v3 → S3
+- **Image upload:** Multer (to memory buffer) → Cloudinary SDK (products, logos, avatars)
+- **Document upload:** Multer (to memory buffer) → Backblaze B2 via S3-compatible SDK
+  (KYC documents — private, signed URLs only)
+- **Future migration:** Backblaze B2 → AWS S3 + KMS when card/billing is available.
+  Because B2 uses an S3-compatible API, this is a credential swap, not a code rewrite.
 - **Input sanitisation:** xss library
 - **Rate limiting:** express-rate-limit on all auth endpoints
 - **CORS:** configured explicitly — never use `cors({ origin: '*' })` in production
@@ -109,7 +115,9 @@ These are non-negotiable. Do not deviate from these under any circumstance.
 - **Frontend:** Vercel
 - **Node backend:** Render or Railway
 - **Python service:** Render (separate service)
-- **File storage:** AWS S3 + KMS
+- **Image storage:** Cloudinary (free tier — product images, logos, profile pictures)
+- **Document storage:** Backblaze B2 (free 10GB — KYC documents, private + signed URLs)
+- **Future:** Migrate B2 → AWS S3 + KMS when billing is available (S3-compatible, near-zero code change)
 - **Secrets:** environment variables only — never committed to git
 
 ---
@@ -142,7 +150,7 @@ credex/
 │   │   ├── controllers/         Business logic (one file per domain)
 │   │   ├── routes/              Express routers (one file per domain)
 │   │   ├── middleware/          auth.ts, ipWhitelist.ts, auditLog.ts, sanitise.ts
-│   │   ├── services/            email.ts, s3.ts, optimizer.ts (calls Python), creditScore.ts
+│   │   ├── services/            email.ts, cloudinary.ts, b2.ts, optimizer.ts, creditScore.ts
 │   │   ├── utils/               helpers, constants, error classes
 │   │   ├── types/               Shared TypeScript interfaces
 │   │   └── server.ts            Entry point
@@ -180,7 +188,7 @@ credex/
 | Payment | Individual payment events against a PO (immutable) |
 | LoanType | Loan product catalogue |
 | LoanApplication | Financing request linked to a PO |
-| Document | KYC document metadata (file in S3) |
+| Document | KYC document metadata (file in Backblaze B2, migrating to S3 later) |
 | DocumentAccessLog | Every document view — immutable audit |
 | Review | Post-PO ratings (buyer→supplier, supplier→buyer, buyer→product) |
 | CreditScore | Versioned credit scores per Company |
@@ -324,8 +332,12 @@ throw new AppError('RFQ not found', 404, 'NOT_FOUND')
 Suppliers create product/service listings. Buyers browse and search them.
 
 **Build notes:**
-- Product images: upload to S3 via Multer in-memory buffer. Store S3 URL in
-  `Product.images[]`. Delete old S3 object when image is replaced.
+- Product images: upload to **Cloudinary** via Multer in-memory buffer.
+  Use Cloudinary's Node SDK (`cloudinary.uploader.upload`).
+  Store the returned `secure_url` in `Product.images[]`.
+  When an image is replaced, call `cloudinary.uploader.destroy(publicId)`
+  to delete the old asset — don't leave orphaned files.
+  Images are public (no signed URLs needed for product photos).
 - Search: MongoDB text index on `Product.name` and `Product.description`.
   Filters: category, city/state (via supplierId → Company lookup), min/max price,
   averageRating, acceptedFinancingMethods, isAvailable.
@@ -341,7 +353,9 @@ Suppliers create product/service listings. Buyers browse and search them.
 **Scalability note:**
 At 100k+ products, text search via MongoDB Atlas Search (Lucene-based) will outperform
 native `$text`. Build with native text index first. Switch to Atlas Search when needed
-without changing the API contract.
+without changing the API contract. Cloudinary also provides image transformations
+(resize, crop, format conversion) for free — use these rather than processing images
+server-side.
 
 ---
 
@@ -505,16 +519,33 @@ review the application, request KYC documents, and approve or reject.
 - Document upload flow:
   1. Client sends file via multipart/form-data
   2. Multer reads into memory buffer
-  3. Backend generates S3 key: `credex/documents/{companyId}/{loanApplicationId}/{uuid}.{ext}`
-  4. Upload to S3 with `ServerSideEncryption: 'aws:kms'`
-  5. Store metadata in Document collection (s3Key, s3Bucket, NOT the full URL)
-  6. Never return s3Key to client
+  3. Backend generates a storage key: `credex/documents/{companyId}/{loanApplicationId}/{uuid}.{ext}`
+  4. Upload to **Backblaze B2** using the S3-compatible SDK:
+     ```typescript
+     // B2 uses an S3-compatible endpoint — same AWS SDK v3, different config
+     const b2Client = new S3Client({
+       endpoint: process.env.B2_ENDPOINT,       // e.g. https://s3.us-west-004.backblazeb2.com
+       region: process.env.B2_REGION,
+       credentials: {
+         accessKeyId: process.env.B2_KEY_ID,
+         secretAccessKey: process.env.B2_APP_KEY
+       }
+     })
+     ```
+  5. Store metadata in Document collection:
+     `storageKey`, `storageProvider: 'backblaze'`, `storageBucket` — NOT the full URL
+  6. Never return `storageKey` or `storageBucket` to client
+  7. When migrating to AWS S3 later: add `storageProvider: 's3'` as a new enum value,
+     update the upload service — all existing documents on B2 remain accessible unchanged
+
 - Document access (underwriter viewing a document):
   1. Underwriter requests document via `GET /api/underwriter/documents/:id/view`
   2. Backend verifies underwriter is assigned to the loan application
-  3. Backend generates signed S3 URL: `getSignedUrl(s3Client, GetObjectCommand, { expiresIn: 900 })`
+  3. Backend generates signed URL using S3-compatible SDK pointed at B2:
+     `getSignedUrl(b2Client, GetObjectCommand, { expiresIn: 900 })`
   4. Backend writes DocumentAccessLog entry
   5. Returns signed URL to underwriter's browser — URL expires in 15 minutes
+  6. **Never cache or store signed URLs** — generate fresh on every request
 - Loan status state machine — valid transitions only:
   ```
   draft → submitted
@@ -822,13 +853,130 @@ Border:      #E5E7EB  (card borders, dividers)
 - **Server Components by default** — use Next.js Server Components for data fetching.
   Only use Client Components when interactivity is required.
 - **Image optimisation** — all images served via Next.js `<Image>` component.
-  S3 URLs should be served via a CDN (CloudFront) in production.
+  Cloudinary URLs should use Cloudinary's transformation parameters for resizing
+  (e.g. `w_400,h_400,c_fill,f_auto,q_auto`) rather than serving full-size originals.
 - **Bundle size** — import only what you use from Recharts and Lucide.
   Avoid barrel imports.
 
 ---
 
-## India-Specific Considerations
+## Storage Services
+
+### Cloudinary (Images)
+
+Used for: product images, company logos, user profile pictures.
+All image assets are **public** — no signed URLs needed.
+
+```typescript
+// services/cloudinary.ts
+import { v2 as cloudinary } from 'cloudinary'
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+})
+
+export const uploadImage = async (buffer: Buffer, folder: string) => {
+  return new Promise<{ url: string; publicId: string }>((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: 'image', transformation: [{ quality: 'auto', fetch_format: 'auto' }] },
+      (error, result) => {
+        if (error || !result) return reject(error)
+        resolve({ url: result.secure_url, publicId: result.public_id })
+      }
+    )
+    stream.end(buffer)
+  })
+}
+
+export const deleteImage = async (publicId: string) => {
+  return cloudinary.uploader.destroy(publicId)
+}
+```
+
+**Required env vars:**
+```
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+```
+
+---
+
+### Backblaze B2 (Documents — KYC files)
+
+Used for: all KYC documents uploaded during loan applications.
+All document assets are **private** — always accessed via signed expiring URLs.
+
+B2 exposes an S3-compatible API. Use AWS SDK v3 pointed at B2's endpoint.
+This means migration to AWS S3 later is a credential + endpoint swap, not a code rewrite.
+
+```typescript
+// services/b2.ts
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { v4 as uuidv4 } from 'uuid'
+
+const b2Client = new S3Client({
+  endpoint: process.env.B2_ENDPOINT,       // e.g. https://s3.us-west-004.backblazeb2.com
+  region: process.env.B2_REGION,           // e.g. us-west-004
+  credentials: {
+    accessKeyId: process.env.B2_KEY_ID!,
+    secretAccessKey: process.env.B2_APP_KEY!
+  }
+})
+
+const BUCKET = process.env.B2_BUCKET_NAME!
+
+export const uploadDocument = async (
+  buffer: Buffer,
+  mimeType: string,
+  companyId: string,
+  loanApplicationId: string,
+  originalFileName: string
+) => {
+  const ext = originalFileName.split('.').pop()
+  const storageKey = `credex/documents/${companyId}/${loanApplicationId}/${uuidv4()}.${ext}`
+
+  await b2Client.send(new PutObjectCommand({
+    Bucket: BUCKET,
+    Key: storageKey,
+    Body: buffer,
+    ContentType: mimeType
+    // Note: add ServerSideEncryption: 'aws:kms' when migrating to AWS S3
+  }))
+
+  return { storageKey, storageBucket: BUCKET, storageProvider: 'backblaze' as const }
+}
+
+export const getDocumentSignedUrl = async (storageKey: string) => {
+  // Expires in 15 minutes — never cache this URL
+  return getSignedUrl(
+    b2Client,
+    new GetObjectCommand({ Bucket: BUCKET, Key: storageKey }),
+    { expiresIn: 900 }
+  )
+}
+```
+
+**Required env vars:**
+```
+B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+B2_REGION=us-west-004
+B2_KEY_ID=
+B2_APP_KEY=
+B2_BUCKET_NAME=credex-documents
+```
+
+**When migrating to AWS S3:** create a new `s3.ts` service with the same function
+signatures as `b2.ts`. Update the document upload controller to use `s3.ts` and set
+`storageProvider: 's3'`. All existing B2 documents remain accessible — their
+`storageProvider: 'backblaze'` field routes them to `b2.ts` for signed URL generation.
+
+---
+
+
 
 - **Currency:** Always display amounts in INR (₹). Store as integers in paise
   (1 rupee = 100 paise) to avoid floating point errors. Display by dividing by 100.
@@ -879,6 +1027,12 @@ If you are handing this task to another AI assistant, verify and share:
 - [ ] Any controller files already written
 - [ ] The current phase and what was last completed
 - [ ] Any deviations from this document that were made and why
+
+**Key decisions to communicate to the next AI:**
+- File storage: Cloudinary for images, Backblaze B2 for documents (not AWS S3 — no billing yet)
+- Document model uses `storageKey` + `storageProvider` not `s3Key` + `s3Bucket`
+- B2 uses AWS SDK v3 pointed at B2's S3-compatible endpoint — same code, different config
+- Migration to AWS S3 is planned for later — storageProvider enum supports both
 
 ---
 
