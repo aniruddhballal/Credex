@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { DM_Serif_Display, Inter, JetBrains_Mono } from 'next/font/google'
 import { Toaster } from 'react-hot-toast'
+import { AuthProvider } from '@/lib/auth-context'
 import './globals.css'
 
 const dmSerif = DM_Serif_Display({
@@ -31,7 +32,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${dmSerif.variable} ${inter.variable} ${jetbrains.variable}`}>
       <body>
-        {children}
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+
         <Toaster
           position="top-right"
           toastOptions={{
