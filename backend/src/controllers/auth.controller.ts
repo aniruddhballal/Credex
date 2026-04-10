@@ -75,10 +75,10 @@ export const register = async (req: Request, res: Response): Promise<void> => {
       entityId: user._id,
       note: 'User self-registered',
       timestamp: new Date(),
-    }).catch(() => { })
+    }).catch(() => {})
 
     const { subject, html } = emailTemplates.verification(firstName, verificationToken)
-    sendEmail({ to: email, subject, html }).catch(() => { })
+    sendEmail({ to: email, subject, html }).catch((err) => { console.error('[auth/register] Email send failed:', err) })
 
     res.status(201).json({
       success: true,
@@ -93,20 +93,32 @@ export const register = async (req: Request, res: Response): Promise<void> => {
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email, password } = req.body
+    console.log(`[login] Attempt for: ${email}`)
+
+    if (!email || !password) {
+      console.warn('[login] Missing email or password in request body')
+      res.status(400).json({ success: false, message: 'Email and password are required' })
+      return
+    }
 
     const user = await User.findOne({ email, isDeleted: false })
     if (!user) {
+      console.warn(`[login] No user found for email: ${email}`)
       res.status(401).json({ success: false, message: 'Invalid credentials' })
       return
     }
 
+    console.log(`[login] User found: ${user._id} | verified: ${user.isEmailVerified}`)
+
     const passwordMatch = await bcrypt.compare(password, user.password)
     if (!passwordMatch) {
+      console.warn(`[login] Password mismatch for: ${email}`)
       res.status(401).json({ success: false, message: 'Invalid credentials' })
       return
     }
 
     if (!user.isEmailVerified) {
+      console.warn(`[login] Email not verified for: ${email}`)
       res.status(403).json({ success: false, message: 'Please verify your email first' })
       return
     }
@@ -137,6 +149,8 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     setRefreshCookie(res, refreshToken)
 
+    console.log(`[login] ✅ Success for: ${email} | role: ${user.role}`)
+
     res.json({
       success: true,
       accessToken,
@@ -151,6 +165,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
       },
     })
   } catch (err) {
+    console.error('[login] ❌ Unexpected error:', err)
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
@@ -238,7 +253,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
     await user.save()
 
     const { subject, html } = emailTemplates.passwordReset(user.firstName, resetToken)
-    sendEmail({ to: email, subject, html }).catch(() => { })
+    sendEmail({ to: email, subject, html }).catch((err) => { console.error('[auth/register] Email send failed:', err) })
 
     res.json({ success: true, message: 'If that email exists, a reset link has been sent.' })
   } catch {
@@ -282,7 +297,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
       entityId: user._id,
       note: 'Password reset',
       timestamp: new Date(),
-    }).catch(() => { })
+    }).catch(() => {})
 
     res.json({ success: true, message: 'Password reset successful. Please log in again.' })
   } catch {
