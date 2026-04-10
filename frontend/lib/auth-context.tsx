@@ -54,8 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await api.get<{ data: AuthUser }>('/api/auth/me')
-      dispatch({ type: 'SET_USER', payload: res.data.data })
+      // Backend returns { success, user } — not { data: { user } }
+      const res = await api.get<{ user: AuthUser }>('/api/auth/me')
+      dispatch({ type: 'SET_USER', payload: res.data.user })
     } catch {
       dispatch({ type: 'CLEAR_USER' })
       tokenStorage.clear()
@@ -74,15 +75,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser])
 
   const login = useCallback(async (email: string, password: string) => {
-    const res = await api.post<{ data: { accessToken: string; user: AuthUser } }>(
+    // Backend returns { success, accessToken, user } — not { data: { accessToken, user } }
+    const res = await api.post<{ accessToken: string; user: AuthUser }>(
       '/api/auth/login',
       { email, password }
     )
-    const { accessToken, user } = res.data.data
+    const { accessToken, user } = res.data
     tokenStorage.set(accessToken)
+
+    // Set lightweight cookies for middleware route protection
+    document.cookie = `credex_role=${user.role};path=/;max-age=${7 * 24 * 60 * 60}`
+    document.cookie = `credex_has_session=1;path=/;max-age=${7 * 24 * 60 * 60}`
+
     dispatch({ type: 'SET_USER', payload: user })
 
-    // Redirect by role
     const roleRoutes: Record<string, string> = {
       buyer: '/buyer/dashboard',
       supplier: '/supplier/dashboard',
@@ -99,6 +105,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // best-effort
     } finally {
       tokenStorage.clear()
+      // Clear middleware cookies
+      document.cookie = 'credex_role=;path=/;max-age=0'
+      document.cookie = 'credex_has_session=;path=/;max-age=0'
       dispatch({ type: 'CLEAR_USER' })
       router.push('/login')
     }
