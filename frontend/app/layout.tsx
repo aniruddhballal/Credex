@@ -35,20 +35,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           {children}
         </AuthProvider>
-
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 4000,
-            style: {
-              fontFamily: 'var(--font-inter)',
-              fontSize: '0.875rem',
-              borderRadius: '8px',
-              border: '1px solid #E5E7EB',
-              boxShadow: '0 4px 16px rgb(0 0 0 / 0.08)',
-            },
-          }}
-        />
+        <AuthProvider>
+          {children}
+          <Toaster
+            position="top-right"
+            toastOptions={{
+              duration: 4000,
+              style: {
+                fontFamily: 'var(--font-inter)',
+                fontSize: '0.875rem',
+                borderRadius: '8px',
+                border: '1px solid #E5E7EB',
+                boxShadow: '0 4px 16px rgb(0 0 0 / 0.08)',
+              },
+            }}
+          />
+        </AuthProvider>
       </body>
     </html>
   )
