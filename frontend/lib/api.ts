@@ -3,7 +3,7 @@
  * Central Axios instance for all backend calls.
  *
  * - Attaches Authorization header from localStorage on every request
- * - On 401 SESSION_EXPIRED: attempts token refresh, retries once
+ * - On 401 from non-auth routes: attempts token refresh, retries once
  * - On second 401: clears auth and redirects to /login
  */
 
@@ -39,24 +39,35 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config
 })
 
-// Response: handle 401 → refresh → retry
+// Routes where a 401 is expected and should NOT trigger a refresh attempt
+// (login failure, unverified email etc. are all valid 401/403 responses)
+const AUTH_ROUTES = ['/api/auth/login', '/api/auth/register', '/api/auth/refresh']
+
+const isAuthRoute = (url?: string): boolean =>
+  AUTH_ROUTES.some((route) => url?.includes(route))
+
+// Response: handle 401 → refresh → retry (only for protected routes)
 let isRefreshing = false
 let refreshQueue: Array<(token: string) => void> = []
 
 api.interceptors.response.use(
   (res) => res,
-  async (error: AxiosError<{ code?: string }>) => {
+  async (error: AxiosError) => {
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
-    const isAuthError = error.response?.status === 401
-    const isExpired = error.response?.data?.code === 'SESSION_EXPIRED'
+    const is401 = error.response?.status === 401
     const isNotRetry = !original._retry
+    const skipRefresh = isAuthRoute(original.url)
 
-    if (isAuthError && isExpired && isNotRetry) {
+    // Pass auth route 401/403s straight through to the caller
+    if (skipRefresh) {
+      return Promise.reject(error)
+    }
+
+    if (is401 && isNotRetry) {
       original._retry = true
 
       if (isRefreshing) {
-        // Queue this request until refresh completes
         return new Promise((resolve) => {
           refreshQueue.push((newToken: string) => {
             original.headers!.Authorization = `Bearer ${newToken}`
@@ -67,12 +78,13 @@ api.interceptors.response.use(
 
       isRefreshing = true
       try {
-        const res = await axios.post<{ data: { accessToken: string } }>(
+        // FIX: backend returns { accessToken } directly, not { data: { accessToken } }
+        const res = await axios.post<{ accessToken: string }>(
           `${BASE_URL}/api/auth/refresh`,
           {},
           { withCredentials: true }
         )
-        const newToken = res.data.data.accessToken
+        const newToken = res.data.accessToken
         tokenStorage.set(newToken)
         refreshQueue.forEach((cb) => cb(newToken))
         refreshQueue = []
@@ -100,19 +112,18 @@ export default api
 
 export interface ApiResponse<T> {
   success: boolean
-  data: T
+  data?: T
   message?: string
 }
 
 export interface ApiError {
   success: false
-  error: string
+  message: string
   code?: string
-  details?: unknown
 }
 
-/** Extract data from the Credex envelope, or throw a readable error */
-export async function apiCall<T>(promise: Promise<{ data: ApiResponse<T> }>): Promise<T> {
+/** Unwrap a direct backend response (our backend returns data at root, not nested) */
+export async function apiCall<T>(promise: Promise<{ data: T }>): Promise<T> {
   const res = await promise
-  return res.data.data
+  return res.data
 }
