@@ -1,51 +1,73 @@
 @import "tailwindcss";
 
-/* ── Scrollbar ── */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@theme {
+  /* 
+    Override Tailwind's built-in indigo palette with Credex royal purple.
+    Every bg-indigo-*, text-indigo-*, border-indigo-* etc. across ALL
+    components now uses this purple automatically — no component changes needed.
+  */
+  --color-indigo-50:  #F5F3FF;
+  --color-indigo-100: #EDE9FE;
+  --color-indigo-200: #DDD6FE;
+  --color-indigo-300: #C4B5FD;
+  --color-indigo-400: #A78BFA;
+  --color-indigo-500: #8B5CF6;
+  --color-indigo-600: #7C3AED;
+  --color-indigo-700: #6D28D9;
+  --color-indigo-800: #5B21B6;
+  --color-indigo-900: #4C1D95;
+  --color-indigo-950: #2E1065;
+
+  /* Navy (used for auth panel background) */
+  --color-navy: #1A1A2E;
+
+  /* Fonts */
+  --font-display: var(--font-dm-serif), Georgia, serif;
+  --font-mono:    var(--font-jetbrains), ui-monospace, monospace;
+
+  /* Font sizes */
+  --font-size-2xs:   0.625rem;
+  --line-height-2xs: 1rem;
+
+  /* Shadows */
+  --shadow-card:  0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+  --shadow-modal: 0 20px 60px -10px rgb(0 0 0 / 0.18);
+
+  /* Animations */
+  --animate-fade-in:        fade-in 0.2s ease-out;
+  --animate-slide-in-right: slide-in-right 0.2s ease-out;
+  --animate-skeleton:       skeleton-pulse 1.8s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(16px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.4; }
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
 
-::-webkit-scrollbar-thumb {
-  background: #D1D5DB;
-  border-radius: 99px;
-}
+/* Selection uses the new purple */
+::selection { background: #EDE9FE; color: #7C3AED; }
 
-::-webkit-scrollbar-thumb:hover {
-  background: #9CA3AF;
-}
+/* Focus ring uses the new purple */
+:focus-visible { outline: none; box-shadow: 0 0 0 3px rgb(124 58 237 / 0.25); }
 
-/* ── Selection ── */
-::selection {
-  background: #EEF2FF;
-  color: #4F46E5;
-}
+body { background: #F8F9FA; color: #111827; }
 
-/* ── Focus visible ── */
-:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgb(79 70 229 / 0.2);
-}
-
-/* ── Base ── */
-html {
-  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
-}
-
-body {
-  background: #F8F9FA;
-  color: #111827;
-}
-
-/* ── Recharts overrides ── */
-.recharts-tooltip-wrapper {
-  outline: none !important;
-}
-
+/* Recharts tooltip */
+.recharts-tooltip-wrapper { outline: none !important; }
 .recharts-default-tooltip {
   border: 1px solid #E5E7EB !important;
   border-radius: 8px !important;

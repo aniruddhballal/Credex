@@ -9,7 +9,7 @@ export interface NavItem {
   label: string
   href: string
   icon: React.ReactNode
-  badge?: number   // notification count
+  badge?: number
 }
 
 interface SidebarProps {
@@ -24,11 +24,11 @@ export function Sidebar({ navItems, role, userName, companyName, onLogout }: Sid
   const pathname = usePathname()
 
   return (
-    <aside className="w-60 shrink-0 h-screen sticky top-0 flex flex-col bg-navy border-r border-white/10">
+    <aside className="w-60 shrink-0 h-screen sticky top-0 flex flex-col bg-white border-r border-gray-200">
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-white/10">
-        <span className="font-display text-xl text-white tracking-tight">Credex</span>
-        <span className="block text-2xs text-white/40 uppercase tracking-widest mt-0.5">{role}</span>
+      <div className="px-5 py-5 border-b border-gray-100">
+        <span className="font-display text-xl text-indigo-600 tracking-tight">Credex</span>
+        <span className="block text-xs text-gray-400 uppercase tracking-widest mt-0.5">{role}</span>
       </div>
 
       {/* Nav */}
@@ -42,16 +42,16 @@ export function Sidebar({ navItems, role, userName, companyName, onLogout }: Sid
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors',
                 active
-                  ? 'bg-white/10 text-white'
-                  : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+                  ? 'bg-indigo-50 text-indigo-700'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
               )}
             >
-              <span className={cn('w-4 h-4 shrink-0', active ? 'text-white' : 'text-white/50')}>
+              <span className={cn('w-4 h-4 shrink-0', active ? 'text-indigo-600' : 'text-gray-400')}>
                 {item.icon}
               </span>
               <span className="flex-1">{item.label}</span>
               {item.badge !== undefined && item.badge > 0 && (
-                <span className="bg-indigo-500 text-white text-2xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                <span className="bg-indigo-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
                   {item.badge > 99 ? '99+' : item.badge}
                 </span>
               )}
@@ -61,21 +61,21 @@ export function Sidebar({ navItems, role, userName, companyName, onLogout }: Sid
       </nav>
 
       {/* User footer */}
-      <div className="px-3 pb-4 border-t border-white/10 pt-3">
-        <div className="flex items-center gap-3 px-3 py-2.5 rounded-lg">
-          <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-white text-xs font-semibold shrink-0">
+      <div className="px-3 pb-4 border-t border-gray-100 pt-3">
+        <div className="flex items-center gap-3 px-3 py-2">
+          <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-semibold shrink-0">
             {userName.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-white truncate">{userName}</p>
+            <p className="text-xs font-semibold text-gray-800 truncate">{userName}</p>
             {companyName && (
-              <p className="text-2xs text-white/40 truncate">{companyName}</p>
+              <p className="text-xs text-gray-400 truncate">{companyName}</p>
             )}
           </div>
         </div>
         <button
           onClick={onLogout}
-          className="mt-1 flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-white/50 hover:bg-white/5 hover:text-white/80 transition-colors"
+          className="mt-1 flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
         >
           <LogOut className="w-4 h-4 shrink-0" />
           Sign out
@@ -85,7 +85,7 @@ export function Sidebar({ navItems, role, userName, companyName, onLogout }: Sid
   )
 }
 
-// ── Top bar for page headers ──────────────────────────────────────────────────
+// ── Top bar ───────────────────────────────────────────────────────────────────
 
 interface TopBarProps {
   title: string
@@ -120,7 +120,7 @@ export function Breadcrumb({ crumbs }: { crumbs: Crumb[] }) {
               {crumb.label}
             </Link>
           ) : (
-            <span className="text-gray-600 font-medium">{crumb.label}</span>
+            <span className="text-gray-700 font-medium">{crumb.label}</span>
           )}
         </span>
       ))}
