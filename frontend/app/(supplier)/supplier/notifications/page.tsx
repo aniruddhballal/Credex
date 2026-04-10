@@ -1,2 +1,2 @@
 import NotificationsPage from '@/components/shared/NotificationsPage'
-export default function BuyerNotificationsPage() { return <NotificationsPage /> }
+export default function SupplierNotificationsPage() { return <NotificationsPage /> }
