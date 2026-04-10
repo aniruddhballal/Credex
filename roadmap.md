@@ -165,119 +165,122 @@ GET   /api/purchase-orders/:id/payments    payment history
 
 ---
 
-## Phase 3 — Python ML Microservice 🔄 NEXT
-**Time estimate: 2–3 weeks**
-**Port VenPayRL engine to Python; integrate LOANlo's credit risk model**
+## Phase 3 — Python ML Microservice ✅ COMPLETE
 
-### Cash Flow Optimiser
-- [ ] FastAPI service setup
-- [ ] Port simulation engine from VenPayRL TypeScript → Python
-- [ ] Port agent logic:
-  - Rule-based agent
-  - Heuristic agent
-  - Q-table agent (with persistent weights — serialize to disk/DB)
-  - DQN agent (move off main thread — use Python multiprocessing or background worker)
-- [ ] New endpoint: POST /optimize
-  - Input: buyer's current cash balance, daily inflow forecast, list of active POs
-    (amount, deadline, penalty rate) — all pulled from Credex DB
-  - Output: day-by-day payment schedule + alert flags
-- [ ] Explainability layer — plain language reason for each recommendation
-- [ ] Node backend calls /optimize and returns results to frontend
-
-### Credit Risk Model (carry from LOANlo)
-- [ ] XGBoost .pkl model already exists — reuse in the same FastAPI service
-- [ ] POST /credit-risk endpoint (already integrated in LOANlo, port to new service)
-- [ ] Extend inputs to include Credex transaction data (not just loan application data)
-
-### Credit Score Engine (new)
-- [ ] POST /credit-score endpoint
-  - Inputs: payment history, timeliness rate, dispute count, order volume,
-    review average, verification status
-  - Output: numerical score (300–900 scale) + tier label
-- [ ] Scheduled job: recompute credit scores for all active users daily
+- [x] FastAPI project setup
+- [x] POST /optimize — PuLP LP solver, 90-day cash flow schedule
+- [x] POST /credit-risk — XGBoost + heuristic fallback, underwriter flags
+- [x] POST /credit-score — 300–900 score, tier, breakdown, improvement tips
+- [x] Node mlService.ts proxy
+- [x] optimizer.controller.ts
+- [x] creditScoreCron.ts — daily recomputation job
 
 ---
 
-## Phase 4 — Frontend (Next.js) ⏳ NOT STARTED
-**Time estimate: 4–6 weeks**
-**Build after backend APIs are stable**
+## Phase 4 — Frontend (Next.js) ✅ COMPLETE
 
-### Design System
-- [ ] Tailwind CSS configuration — define colour palette, typography, spacing
-- [ ] Consider VenPayRL's aesthetic as inspiration: warm, clean, modern
-  (#F5F3EF cream, DM Serif Display for headings, Inter for body)
-- [ ] Component library: buttons, inputs, modals, cards, tables, skeletons,
-      toast notifications — build these first before pages
+37 pages and components total:
 
-### Pages — Buyer
-- [ ] Auth: register, login, forgot password, reset password
-- [ ] Dashboard: overview of active POs, payment schedule from optimizer,
-      credit score, notifications
-- [ ] Supplier discovery: search, browse, filters
-- [ ] Supplier profile page (with products, reviews, credit score/badge)
-- [ ] Product detail page
-- [ ] RFQ submission flow
-- [ ] Negotiation view (counter offers, chat)
-- [ ] Active POs list + individual PO detail
-- [ ] Payment flow (mark payment, partial payment)
-- [ ] Cash flow optimizer view (schedule table, alert list, explainability)
-- [ ] Loan application flow (multi-step)
-- [ ] Loan status tracker
-- [ ] Profile page + edit profile
-- [ ] Reviews (submit, view)
+**Auth (6):** login, register, forgot-password, reset-password, verify-email, auth layout
 
-### Pages — Supplier
-- [ ] Dashboard: active listings, incoming RFQs, payment status
-- [ ] Product management (create, edit inline, delete)
-- [ ] Image upload
-- [ ] RFQ management (view, accept, reject, counter)
-- [ ] Active POs list
-- [ ] Payment received tracker
-- [ ] Profile page + edit
-- [ ] Reviews (view received)
-- [ ] Cash flow optimizer (supplier-side: receivables view)
+**Buyer (11):** dashboard, discover (search + filters), product detail + RFQ modal,
+RFQ list, RFQ negotiation view, PO list, PO detail + payment recording + reviews,
+cash flow optimizer + Recharts chart, loans list, loan apply (3-step),
+loan detail + doc upload, notifications, profile
 
-### Pages — Underwriter
-- [ ] Dashboard: incoming loan applications, queue
-- [ ] Application detail view
-- [ ] Document vault viewer (signed URL access, logged)
-- [ ] Approve / reject / request documents actions
-- [ ] Profile
+**Supplier (10):** dashboard, listings grid, create listing, edit listing,
+RFQ list, RFQ negotiation, PO list, PO detail + fulfilment stepper,
+notifications, profile
 
-### Admin Frontend (separate subdomain)
-- [ ] IP-restricted access (handled at infra level)
-- [ ] Login with 2FA (authenticator app)
-- [ ] DB overview dashboard — all collections, filterable, sortable
-- [ ] User management (view, soft delete, restore)
-- [ ] Loan application management (view, restore)
-- [ ] PO management (view, cancel)
-- [ ] Audit log viewer
-- [ ] Session management (view all active sessions, remote terminate)
-- [ ] Credit score overrides (if needed)
+**Underwriter (3):** dashboard + queue stats, applications list,
+application detail + doc viewer + approve/reject/request-docs
+
+**UI components (9):** Button, Input/Textarea/Select, Card, Badge/StatusBadge,
+Modal/ConfirmModal, Skeleton variants, Table, Pagination/EmptyState/ErrorState/Spinner, StatCard
+
+**Infrastructure:** auth context, Axios with silent token refresh, typed API hooks
+for every endpoint, useFetch/usePaginated/useDebounce/useDisclosure,
+full TypeScript types, Next.js middleware route protection,
+Indian currency/date formatters, Tailwind design tokens
 
 ---
 
-## Phase 5 — Integration Testing & Hardening ⏳ NOT STARTED
-**Time estimate: 2–3 weeks**
+## Phase 5 — Integration Testing & Hardening 🔄 NEXT
 
-- [ ] End-to-end flow testing: register → list product → RFQ → negotiate →
-      PO → payment → review
-- [ ] End-to-end loan flow: PO confirmed → loan application → document upload →
-      underwriter review → approval → EMI tracked in optimizer
-- [ ] Optimizer integration test: real PO data flows into Python service,
-      schedule returned and displayed correctly
-- [ ] Security audit:
-  - All S3 URLs are signed + expiring (no public access)
-  - Admin routes IP-restricted
-  - JWT validation on all protected routes
-  - Input sanitisation everywhere
-  - Rate limiting on auth endpoints
-- [ ] DPDP Act 2023 compliance:
-  - Data deletion request flow
-  - Data retention policy enforced in code
-  - Privacy policy page
-- [ ] Load test critical endpoints (optimizer, document upload, search)
-- [ ] Error handling audit — every API endpoint returns consistent error shapes
+This is not optional before deployment. Do not skip.
+
+### End-to-End Flow Tests (Manual first, automated later)
+
+**Core marketplace flow:**
+- [ ] Register as supplier → create company → list a product with image
+- [ ] Register as buyer → create company → search + find product
+- [ ] Buyer submits RFQ → supplier counters → buyer accepts → PO created
+- [ ] Buyer records partial payment → PO status updates → supplier sees it
+- [ ] Supplier marks fulfilment delivered → PO completes → reviews unlock
+- [ ] Both parties submit reviews → aggregate ratings update on product + company
+
+**Loan flow:**
+- [ ] Buyer applies for loan on a confirmed PO → draft created
+- [ ] Buyer submits draft → underwriter gets notification
+- [ ] Underwriter assigns self → requests documents
+- [ ] Buyer uploads docs → underwriter reviews → approves
+- [ ] Credit risk score computed on submission
+- [ ] Loan approval details visible on loan detail page
+
+**Optimizer flow:**
+- [ ] Buyer has 3+ active POs with different deadlines and penalty rates
+- [ ] Buyer opens optimizer, enters cash balance + inflows
+- [ ] Schedule returned, chart renders, alerts show correctly
+- [ ] Schedule reflects actual PO data from DB (not mock)
+
+**Admin flow:**
+- [ ] Admin login from allowlisted IP with TOTP works
+- [ ] Admin login from non-allowlisted IP is blocked
+- [ ] Admin soft deletes a user → user cannot log in
+- [ ] Admin restores user → user can log in again
+- [ ] Audit log entry created for every admin action
+
+### Security Checks (Non-negotiable before deployment)
+- [ ] Try accessing `/api/admin/*` from a non-allowlisted IP → must get 403
+- [ ] Try accessing `/api/buyer/*` with a supplier token → must get 403
+- [ ] Try fetching a document's signed URL as a different user → must get 403
+- [ ] Check that no API response ever contains `storageKey`, `storageBucket`, `password`,
+      `verificationToken`, `resetPasswordToken` — grep the codebase for these
+- [ ] Submit XSS payload in product name: `<script>alert(1)</script>` → must be sanitised
+- [ ] Hit `/api/auth/login` 11 times in 1 minute from same IP → must get 429
+- [ ] Expire an access token, try a protected route → must get 401
+- [ ] Refresh with expired refresh token → must get 401
+
+### Data Integrity Checks
+- [ ] Make a partial payment → verify `amountPaid + amountRemaining === totalPrice` exactly
+- [ ] Submit two reviews of the same type on the same PO → second must fail with 409
+- [ ] Try to create a PO directly (not from accepted RFQ) → must be blocked
+- [ ] Try to pay more than `amountRemaining` → must be blocked
+- [ ] Soft delete a product → verify it no longer appears in public search results
+- [ ] Verify Payment documents cannot be updated after creation (no PATCH /payments/:id)
+
+### Performance Checks
+- [ ] Product search with 0 results returns fast (no full collection scan)
+- [ ] Run `explain()` on the product search query — verify indexes are hit
+- [ ] Optimizer returns within 2 seconds for a buyer with 10 active POs
+- [ ] Document signed URL generates within 500ms
+
+### Missing Piece — Admin Frontend
+The admin frontend (separate subdomain, IP-restricted, TOTP login) was not
+built in Phase 4. This is needed before deployment for:
+- User management (soft delete, restore)
+- LoanType management
+- Audit log viewer
+- Company verification
+- Session management
+
+**Options:**
+1. Build a minimal admin frontend now (1 week — basic tables, actions, no polish)
+2. Use the existing `/api/admin/*` routes via a tool like Postman or Retool temporarily
+3. Build it properly as a separate Next.js app after deployment
+
+Recommendation: Option 2 for now (Retool is free, connects to your API in minutes),
+build Option 3 properly post-launch when you have real admin needs.
 
 ---
 
@@ -304,48 +307,28 @@ GET   /api/purchase-orders/:id/payments    payment history
 | 0 | Schema + setup | ✅ Done | — |
 | 1 | Backend foundation | ✅ Done | — |
 | 2 | Loan marketplace + document vault | ✅ Done | — |
-| 3 | Python ML microservice | 🔄 Next | 2–3 weeks |
-| 4 | Next.js frontend | ⏳ | 4–6 weeks |
-| 5 | Testing + hardening | ⏳ | 2–3 weeks |
+| 3 | Python ML microservice | ✅ Done | — |
+| 4 | Next.js frontend | ✅ Done | — |
+| 5 | Testing + hardening | 🔄 Next | 1–2 weeks |
 | 6 | Deployment | ⏳ | 1 week |
-| **Total remaining** | | | **~9–13 weeks** |
+| **Total remaining** | | | **~2–3 weeks** |
 
 ---
 
-## What To Build Next
+## What To Do Next
 
-**Backend is 100% complete. All 17 models written. All routes live.**
+**Phases 0–4 are complete. The platform is fully built.**
 
-Full backend route map:
-```
-/api/auth           register, login, refresh, verify-email, forgot/reset-password, logout, me
-/api/users          profile, update, change-password
-/api/companies      create, get, update, list
-/api/products       CRUD, search + filters
-/api/rfqs           create, counter, accept, decline, list, get
-/api/purchase-orders create, get, list, fulfilment, cancel, payments
-/api/loans          create, submit, assign, request-docs, approve, reject
-/api/notifications  list, mark-read, mark-all-read
-/api/reviews        submit, list
-/api/chat           send, get thread
-/api/documents      upload, signed URL, list, accept, reject, delete
-/api/images         profile pic, company logo, product images
-/api/credit-scores  me, me/history, compute, company/:id (admin)
-/api/admin          users, companies/verify, loan-types CRUD,
-                    restoration-requests, audit-logs
-```
+Phase 5 is next — work through the testing checklist above top to bottom.
+Start with the core marketplace flow (register → RFQ → PO → payment → review)
+before touching security or performance checks.
 
-**Phase 3 is next: Python ML microservice (`/ml-service`)**
+**One gap to note:** the Admin frontend was not built in Phase 4.
+Recommendation: use Retool (free, connects to your API in minutes) as a temporary
+admin interface while you finish testing and deployment. Build a proper admin
+frontend as a separate Next.js app post-launch.
 
-Build order within Phase 3:
-1. FastAPI project setup + health check endpoint
-2. Port VenPayRL agents to Python (rule, heuristic, Q-table, DQN)
-3. POST /optimize — cash flow optimizer (reads real PO data, returns schedule)
-4. POST /credit-risk — XGBoost model from LOANlo (port .pkl file)
-5. POST /credit-score — 300–900 score computation
-6. Wire Node backend proxy routes to Python service
-
-Then Phase 4: Next.js frontend.
+Phase 6 (deployment) starts after Phase 5 checklist is mostly green.
 
 ---
 
