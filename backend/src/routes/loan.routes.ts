@@ -11,6 +11,7 @@ import {
 } from '../controllers/loan.controller'
 import { authenticate, requireRole } from '../middleware/auth'
 import { sanitiseBody } from '../middleware/sanitise'
+import { upload, uploadDocumentHandler } from '../controllers/document.controller'
 
 const router = Router()
 
@@ -26,5 +27,9 @@ router.patch('/:id/assign', requireRole('underwriter', 'system_admin'), assignUn
 router.post('/:id/request-documents', sanitiseBody, requireRole('underwriter', 'system_admin'), requestDocuments)
 router.post('/:id/approve', sanitiseBody, requireRole('underwriter', 'system_admin'), approveLoan)
 router.post('/:id/reject', sanitiseBody, requireRole('underwriter', 'system_admin'), rejectLoan)
+router.post('/:id/documents', upload.single('document'),
+  (req, _res, next) => { req.body.loanApplicationId = req.params.id; next() },
+  uploadDocumentHandler
+)
 
 export default router
