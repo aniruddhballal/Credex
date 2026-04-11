@@ -115,14 +115,14 @@ export const updateMyCompany = async (req: AuthRequest, res: Response): Promise<
     const before = { name: company.name, email: company.email, city: company.city, state: company.state, gstin: company.gstin, pan: company.pan }
     const updatable = { name, legalName, description, website, email, phone, address, city, state, pincode, gstin, pan, cin, udyamNumber, industry, tags }
     Object.entries(updatable).forEach(([key, val]) => {
-      if (val !== undefined) (company as Record<string, unknown>)[key] = val
+      if (val !== undefined) company.set(key, val)
     })
     await company.save()
 
     AuditLog.create({
       performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req),
       action: 'company.update', entityType: 'Company', entityId: company._id,
-      changes: Object.fromEntries(Object.entries(before).map(([k, v]) => [k, { before: v, after: (company as Record<string, unknown>)[k] }])),
+      changes: Object.fromEntries(Object.entries(before).map(([k, v]) => [k, { before: v, after: company.get(k) }])),
       timestamp: new Date(),
     }).catch(() => {})
 
