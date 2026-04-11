@@ -1,12 +1,10 @@
 import { Response } from 'express'
-import { Types } from 'mongoose'
 import multer from 'multer'
 import { uploadImage, deleteImage, CloudinaryFolder } from '../services/cloudinary'
 import User from '../models/User'
 import Company from '../models/Company'
 import Product from '../models/Product'
 import { AuthRequest } from '../middleware/auth'
-import { sendSuccess, sendError } from '../utils/response'
 
 // Multer — memory buffer only, no disk
 export const imageUpload = multer({
