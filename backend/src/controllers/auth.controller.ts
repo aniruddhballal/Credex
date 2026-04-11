@@ -12,6 +12,7 @@ import {
   generateResetToken,
 } from '../utils/jwt'
 import { sendEmail, emailTemplates } from '../utils/email'
+import { sendSuccess, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
 const BCRYPT_ROUNDS = 12
@@ -27,7 +28,7 @@ const setRefreshCookie = (res: Response, token: string): void => {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   })
 }
 
@@ -37,55 +38,39 @@ export const register = async (req: Request, res: Response): Promise<void> => {
     const { firstName, lastName, email, password, role, phone } = req.body
 
     if (!['buyer', 'supplier'].includes(role)) {
-      res.status(400).json({ success: false, message: 'Role must be buyer or supplier' })
-      return
+      sendError(res, 'Role must be buyer or supplier', 400); return
     }
 
     const existing = await User.findOne({ email })
     if (existing) {
-      res.status(409).json({ success: false, message: 'Email already registered' })
-      return
+      sendError(res, 'Email already registered', 409); return
     }
 
     const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS)
     const verificationToken = generateVerificationToken()
-    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000) // 24h
+    const verificationTokenExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000)
 
     const user = await User.create({
-      firstName,
-      lastName,
-      email,
-      password: hashedPassword,
-      role,
-      phone,
-      isEmailVerified: false,
-      verificationToken,
-      verificationTokenExpiry,
-      isDeleted: false,
-      isIpRestricted: false,
-      ipWhitelist: [],
+      firstName, lastName, email, password: hashedPassword, role, phone,
+      isEmailVerified: false, verificationToken, verificationTokenExpiry,
+      isDeleted: false, isIpRestricted: false, ipWhitelist: [],
     })
 
     AuditLog.create({
-      performedBy: user._id,
-      performedByRole: user.role,
-      ipAddress: getIp(req),
-      action: 'user.create',
-      entityType: 'User',
-      entityId: user._id,
-      note: 'User self-registered',
-      timestamp: new Date(),
+      performedBy: user._id, performedByRole: user.role, ipAddress: getIp(req),
+      action: 'user.create', entityType: 'User', entityId: user._id,
+      note: 'User self-registered', timestamp: new Date(),
     }).catch(() => {})
 
     const { subject, html } = emailTemplates.verification(firstName, verificationToken)
-    sendEmail({ to: email, subject, html }).catch((err) => { console.error('[auth/register] Email send failed:', err) })
-
-    res.status(201).json({
-      success: true,
-      message: 'Registration successful. Please verify your email.',
+    sendEmail({ to: email, subject, html }).catch((err) => {
+      console.error('[auth/register] Email send failed:', err)
     })
+
+    sendSuccess(res, null, 'Registration successful. Please verify your email.', 201)
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error' })
+    console.error('[register]', err)
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -96,16 +81,13 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     console.log(`[login] Attempt for: ${email}`)
 
     if (!email || !password) {
-      console.warn('[login] Missing email or password in request body')
-      res.status(400).json({ success: false, message: 'Email and password are required' })
-      return
+      sendError(res, 'Email and password are required', 400); return
     }
 
     const user = await User.findOne({ email, isDeleted: false })
     if (!user) {
       console.warn(`[login] No user found for email: ${email}`)
-      res.status(401).json({ success: false, message: 'Invalid credentials' })
-      return
+      sendError(res, 'Invalid credentials', 401); return
     }
 
     console.log(`[login] User found: ${user._id} | verified: ${user.isEmailVerified}`)
@@ -113,14 +95,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     const passwordMatch = await bcrypt.compare(password, user.password)
     if (!passwordMatch) {
       console.warn(`[login] Password mismatch for: ${email}`)
-      res.status(401).json({ success: false, message: 'Invalid credentials' })
-      return
+      sendError(res, 'Invalid credentials', 401); return
     }
 
     if (!user.isEmailVerified) {
       console.warn(`[login] Email not verified for: ${email}`)
-      res.status(403).json({ success: false, message: 'Please verify your email first' })
-      return
+      sendError(res, 'Please verify your email first', 403); return
     }
 
     const accessToken = generateAccessToken({
@@ -130,18 +110,12 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     })
 
     const { token: refreshToken, jti } = generateRefreshToken(user._id as Types.ObjectId)
-
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 
     await Session.create({
-      userId: user._id,
-      sessionToken: jti,
-      ipAddress: getIp(req),
+      userId: user._id, sessionToken: jti, ipAddress: getIp(req),
       deviceInfo: { userAgent: req.headers['user-agent'] || 'unknown' },
-      isActive: true,
-      loginTime: new Date(),
-      lastActivity: new Date(),
-      expiresAt,
+      isActive: true, loginTime: new Date(), lastActivity: new Date(), expiresAt,
     })
 
     user.lastActivity = new Date()
@@ -151,8 +125,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 
     console.log(`[login] ✅ Success for: ${email} | role: ${user.role}`)
 
-    res.json({
-      success: true,
+    sendSuccess(res, {
       accessToken,
       user: {
         id: user._id,
@@ -166,7 +139,7 @@ export const login = async (req: Request, res: Response): Promise<void> => {
     })
   } catch (err) {
     console.error('[login] ❌ Unexpected error:', err)
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -174,24 +147,14 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 export const refreshToken = async (req: Request, res: Response): Promise<void> => {
   try {
     const token = req.cookies?.[REFRESH_TOKEN_COOKIE]
-    if (!token) {
-      res.status(401).json({ success: false, message: 'No refresh token' })
-      return
-    }
+    if (!token) { sendError(res, 'No refresh token', 401); return }
 
     const payload = verifyRefreshToken(token)
-
     const session = await Session.findOne({ sessionToken: payload.jti, isActive: true })
-    if (!session) {
-      res.status(401).json({ success: false, message: 'Session expired or invalid' })
-      return
-    }
+    if (!session) { sendError(res, 'Session expired or invalid', 401); return }
 
     const user = await User.findById(payload.userId)
-    if (!user || user.isDeleted) {
-      res.status(401).json({ success: false, message: 'User not found' })
-      return
-    }
+    if (!user || user.isDeleted) { sendError(res, 'User not found', 401); return }
 
     const accessToken = generateAccessToken({
       userId: user._id.toString(),
@@ -202,9 +165,9 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
     session.lastActivity = new Date()
     await session.save()
 
-    res.json({ success: true, accessToken })
+    sendSuccess(res, { accessToken })
   } catch {
-    res.status(401).json({ success: false, message: 'Invalid or expired refresh token' })
+    sendError(res, 'Invalid or expired refresh token', 401)
   }
 }
 
@@ -212,26 +175,22 @@ export const refreshToken = async (req: Request, res: Response): Promise<void> =
 export const verifyEmail = async (req: Request, res: Response): Promise<void> => {
   try {
     const { token } = req.query
-
     const user = await User.findOne({
       verificationToken: token,
       verificationTokenExpiry: { $gt: new Date() },
       isDeleted: false,
     })
 
-    if (!user) {
-      res.status(400).json({ success: false, message: 'Invalid or expired verification link' })
-      return
-    }
+    if (!user) { sendError(res, 'Invalid or expired verification link', 400); return }
 
     user.isEmailVerified = true
     user.verificationToken = undefined
     user.verificationTokenExpiry = undefined
     await user.save()
 
-    res.json({ success: true, message: 'Email verified successfully' })
+    sendSuccess(res, null, 'Email verified successfully')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -239,25 +198,24 @@ export const verifyEmail = async (req: Request, res: Response): Promise<void> =>
 export const forgotPassword = async (req: Request, res: Response): Promise<void> => {
   try {
     const { email } = req.body
-
     const user = await User.findOne({ email, isDeleted: false })
-    // Always return 200 to avoid email enumeration
     if (!user) {
-      res.json({ success: true, message: 'If that email exists, a reset link has been sent.' })
-      return
+      sendSuccess(res, null, 'If that email exists, a reset link has been sent.'); return
     }
 
     const resetToken = generateResetToken()
     user.resetPasswordToken = resetToken
-    user.resetPasswordTokenExpiry = new Date(Date.now() + 30 * 60 * 1000) // 30 min
+    user.resetPasswordTokenExpiry = new Date(Date.now() + 30 * 60 * 1000)
     await user.save()
 
     const { subject, html } = emailTemplates.passwordReset(user.firstName, resetToken)
-    sendEmail({ to: email, subject, html }).catch((err) => { console.error('[auth/register] Email send failed:', err) })
+    sendEmail({ to: email, subject, html }).catch((err) => {
+      console.error('[auth/forgot-password] Email send failed:', err)
+    })
 
-    res.json({ success: true, message: 'If that email exists, a reset link has been sent.' })
+    sendSuccess(res, null, 'If that email exists, a reset link has been sent.')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -265,43 +223,33 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
 export const resetPassword = async (req: Request, res: Response): Promise<void> => {
   try {
     const { token, password } = req.body
-
     const user = await User.findOne({
       resetPasswordToken: token,
       resetPasswordTokenExpiry: { $gt: new Date() },
       isDeleted: false,
     })
 
-    if (!user) {
-      res.status(400).json({ success: false, message: 'Invalid or expired reset link' })
-      return
-    }
+    if (!user) { sendError(res, 'Invalid or expired reset link', 400); return }
 
     user.password = await bcrypt.hash(password, BCRYPT_ROUNDS)
     user.resetPasswordToken = undefined
     user.resetPasswordTokenExpiry = undefined
     await user.save()
 
-    // Invalidate all active sessions on password reset
     await Session.updateMany(
       { userId: user._id, isActive: true },
       { isActive: false, logoutReason: 'password_reset', logoutTime: new Date() }
     )
 
     AuditLog.create({
-      performedBy: user._id,
-      performedByRole: user.role,
-      ipAddress: getIp(req),
-      action: 'user.update',
-      entityType: 'User',
-      entityId: user._id,
-      note: 'Password reset',
-      timestamp: new Date(),
+      performedBy: user._id, performedByRole: user.role, ipAddress: getIp(req),
+      action: 'user.update', entityType: 'User', entityId: user._id,
+      note: 'Password reset', timestamp: new Date(),
     }).catch(() => {})
 
-    res.json({ success: true, message: 'Password reset successful. Please log in again.' })
+    sendSuccess(res, null, 'Password reset successful. Please log in again.')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -309,7 +257,6 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
 export const logout = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const token = req.cookies?.[REFRESH_TOKEN_COOKIE]
-
     if (token) {
       try {
         const payload = verifyRefreshToken(token)
@@ -317,28 +264,26 @@ export const logout = async (req: AuthRequest, res: Response): Promise<void> => 
           { sessionToken: payload.jti },
           { isActive: false, logoutReason: 'user', logoutTime: new Date() }
         )
-      } catch {
-        // token already invalid — fine
-      }
+      } catch {}
     }
-
     res.clearCookie(REFRESH_TOKEN_COOKIE)
-    res.json({ success: true, message: 'Logged out successfully' })
+    sendSuccess(res, null, 'Logged out successfully')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // GET /api/auth/me
 export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const user = await User.findById(req.user!.userId).select('-password -verificationToken -resetPasswordToken')
-    if (!user || user.isDeleted) {
-      res.status(404).json({ success: false, message: 'User not found' })
-      return
-    }
-    res.json({ success: true, user })
+    const user = await User.findById(req.user!.userId)
+      .select('-password -verificationToken -resetPasswordToken')
+      .populate('companyId', 'name type isVerified trustBadge logo city state')
+
+    if (!user || user.isDeleted) { sendError(res, 'User not found', 404); return }
+
+    sendSuccess(res, { user })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
