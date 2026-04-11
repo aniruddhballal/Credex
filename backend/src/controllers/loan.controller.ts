@@ -3,16 +3,17 @@ import { Types } from 'mongoose'
 import LoanApplication from '../models/LoanApplication'
 import LoanType from '../models/LoanType'
 import PurchaseOrder from '../models/PurchaseOrder'
+import DocumentModel from '../models/Document'
 import User from '../models/User'
 import Company from '../models/Company'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
+import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
-  req.socket.remoteAddress ||
-  'unknown'
+  req.socket.remoteAddress || 'unknown'
 
 const getUserCompany = async (userId: string) => {
   const user = await User.findById(userId)
@@ -21,56 +22,32 @@ const getUserCompany = async (userId: string) => {
   return { user, company }
 }
 
-// POST /api/loans
-// Create a draft loan application
+// POST /api/loans — FIX 8: accept tenureMonths or requestedTenureMonths
 export const createLoanApplication = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
-    const { loanTypeId, purchaseOrderId, requestedAmount, requestedTenureMonths, purpose } = req.body
+    const { loanTypeId, purchaseOrderId, requestedAmount, requestedTenureMonths, tenureMonths, purpose } = req.body
+    const resolvedTenure = requestedTenureMonths ?? tenureMonths  // FIX 8
 
-    if (!loanTypeId || !requestedAmount || !requestedTenureMonths || !purpose) {
-      res.status(400).json({ success: false, message: 'loanTypeId, requestedAmount, requestedTenureMonths and purpose are required' })
-      return
+    if (!loanTypeId || !requestedAmount || !resolvedTenure || !purpose) {
+      sendError(res, 'loanTypeId, requestedAmount, tenureMonths and purpose are required', 400); return
     }
 
     const loanType = await LoanType.findOne({ _id: loanTypeId, isActive: true })
-    if (!loanType) {
-      res.status(404).json({ success: false, message: 'Loan type not found or inactive' })
-      return
-    }
+    if (!loanType) { sendError(res, 'Loan type not found or inactive', 404); return }
 
     if (requestedAmount < loanType.minAmount || requestedAmount > loanType.maxAmount) {
-      res.status(400).json({
-        success: false,
-        message: `Requested amount must be between ₹${loanType.minAmount / 100} and ₹${loanType.maxAmount / 100}`,
-      })
-      return
+      sendError(res, `Requested amount must be between ₹${loanType.minAmount / 100} and ₹${loanType.maxAmount / 100}`, 400); return
+    }
+    if (resolvedTenure < loanType.minTenureMonths || resolvedTenure > loanType.maxTenureMonths) {
+      sendError(res, `Tenure must be between ${loanType.minTenureMonths} and ${loanType.maxTenureMonths} months`, 400); return
     }
 
-    if (requestedTenureMonths < loanType.minTenureMonths || requestedTenureMonths > loanType.maxTenureMonths) {
-      res.status(400).json({
-        success: false,
-        message: `Tenure must be between ${loanType.minTenureMonths} and ${loanType.maxTenureMonths} months`,
-      })
-      return
-    }
-
-    // If tied to a PO, validate it belongs to this company
     if (purchaseOrderId) {
-      const po = await PurchaseOrder.findOne({
-        _id: purchaseOrderId,
-        buyerId: company._id,
-        isDeleted: false,
-      })
-      if (!po) {
-        res.status(404).json({ success: false, message: 'Purchase order not found or not yours' })
-        return
-      }
+      const po = await PurchaseOrder.findOne({ _id: purchaseOrderId, buyerId: company._id, isDeleted: false })
+      if (!po) { sendError(res, 'Purchase order not found or not yours', 404); return }
     }
 
     const loan = await LoanApplication.create({
@@ -78,120 +55,64 @@ export const createLoanApplication = async (req: AuthRequest, res: Response): Pr
       applicantUserId: new Types.ObjectId(req.user!.userId),
       loanTypeId: new Types.ObjectId(loanTypeId),
       purchaseOrderId: purchaseOrderId ? new Types.ObjectId(purchaseOrderId) : undefined,
-      requestedAmount,
-      requestedTenureMonths,
-      purpose,
+      requestedAmount, requestedTenureMonths: resolvedTenure, purpose,
       status: 'draft',
-      statusHistory: [{
-        status: 'draft',
-        changedBy: new Types.ObjectId(req.user!.userId),
-        changedAt: new Date(),
-        note: 'Application created',
-      }],
-      totalRepaid: 0,
-      isDeleted: false,
+      statusHistory: [{ status: 'draft', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: 'Application created' }],
+      totalRepaid: 0, isDeleted: false,
     })
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.create',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.create', entityType: 'LoanApplication', entityId: loan._id, timestamp: new Date() }).catch(() => {})
 
-    res.status(201).json({ success: true, loan })
+    sendSuccess(res, { loan }, undefined, 201)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // POST /api/loans/:id/submit
-// Applicant submits draft for review
 export const submitLoanApplication = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
-    const loan = await LoanApplication.findOne({
-      _id: req.params.id,
-      companyId: company._id,
-      isDeleted: false,
-    })
-
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
-
-    if (loan.status !== 'draft') {
-      res.status(400).json({ success: false, message: 'Only draft applications can be submitted' })
-      return
-    }
+    const loan = await LoanApplication.findOne({ _id: req.params.id, companyId: company._id, isDeleted: false })
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
+    if (loan.status !== 'draft') { sendError(res, 'Only draft applications can be submitted', 400); return }
 
     loan.status = 'submitted'
-    loan.statusHistory.push({
-      status: 'submitted',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note: 'Submitted for review',
-    })
+    loan.statusHistory.push({ status: 'submitted', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: 'Submitted for review' })
     await loan.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.update',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      changes: { status: { before: 'draft', after: 'submitted' } },
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.update', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before: 'draft', after: 'submitted' } }, timestamp: new Date() }).catch(() => {})
 
-    res.json({ success: true, loan })
+    sendSuccess(res, { loan })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // GET /api/loans
-// Applicant sees their own; underwriter sees all submitted+
 export const listLoanApplications = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { status, lastId, limit = '20' } = req.query
+    const { status, lastId, cursor, limit = '20' } = req.query
     const pageLimit = Math.min(parseInt(limit as string), 50)
-
     const filter: Record<string, unknown> = { isDeleted: false }
 
-    if (req.user!.role === 'underwriter' || req.user!.role === 'system_admin') {
-      // Underwriters see all non-draft applications
+    if (['underwriter', 'system_admin'].includes(req.user!.role)) {
       if (status) filter.status = status
       else filter.status = { $ne: 'draft' }
-
-      if (req.user!.role === 'underwriter') {
-        // Can filter to just their assigned ones
-        if (req.query.mine === 'true') {
-          filter.assignedUnderwriterId = new Types.ObjectId(req.user!.userId)
-        }
+      if (req.user!.role === 'underwriter' && req.query.mine === 'true') {
+        filter.assignedUnderwriterId = new Types.ObjectId(req.user!.userId)
       }
     } else {
-      // Applicant sees their own company's loans
       const { company } = await getUserCompany(req.user!.userId)
-      if (!company) {
-        res.status(403).json({ success: false, message: 'No company linked to account' })
-        return
-      }
+      if (!company) { sendError(res, 'No company linked to account', 403); return }
       filter.companyId = company._id
       if (status) filter.status = status
     }
 
-    if (lastId) filter._id = { $lt: new Types.ObjectId(lastId as string) }
+    const resolvedCursor = (lastId ?? cursor) as string | undefined
+    if (resolvedCursor) filter._id = { $lt: new Types.ObjectId(resolvedCursor) }
 
     const loans = await LoanApplication.find(filter)
       .populate('loanTypeId', 'name code baseInterestRate')
@@ -200,17 +121,13 @@ export const listLoanApplications = async (req: AuthRequest, res: Response): Pro
       .sort({ updatedAt: -1 })
       .limit(pageLimit)
 
-    res.json({
-      success: true,
-      loans,
-      nextCursor: loans.length === pageLimit ? loans[loans.length - 1]._id : null,
-    })
+    sendPaginated(res, loans, loans.length === pageLimit ? loans[loans.length - 1]._id.toString() : null)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/loans/:id
+// GET /api/loans/:id — FIX 14: include documents[]
 export const getLoanApplicationById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const loan = await LoanApplication.findOne({ _id: req.params.id, isDeleted: false })
@@ -220,281 +137,143 @@ export const getLoanApplicationById = async (req: AuthRequest, res: Response): P
       .populate('assignedUnderwriterId', 'firstName lastName email')
       .populate('purchaseOrderId', 'totalPrice amountRemaining paymentDeadline status')
 
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
 
     const isUnderwriter = ['underwriter', 'system_admin'].includes(req.user!.role)
     const { company } = await getUserCompany(req.user!.userId)
-
     const isOwner = company && loan.companyId._id?.toString() === company._id.toString()
 
-    if (!isUnderwriter && !isOwner) {
-      res.status(403).json({ success: false, message: 'Access denied' })
-      return
-    }
+    if (!isUnderwriter && !isOwner) { sendError(res, 'Access denied', 403); return }
 
-    res.json({ success: true, loan })
+    // FIX 14 — fetch and attach documents
+    const documents = await DocumentModel.find({ loanApplicationId: loan._id, isDeleted: false })
+      .select('-s3Key -s3Bucket')
+
+    sendSuccess(res, { loan: { ...loan.toObject(), documents } })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // PATCH /api/loans/:id/assign
-// Underwriter assigns themselves
 export const assignUnderwriter = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) {
-      res.status(403).json({ success: false, message: 'Only underwriters can be assigned' })
-      return
-    }
+    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can be assigned', 403); return }
 
     const loan = await LoanApplication.findOne({ _id: req.params.id, isDeleted: false })
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
-
-    if (!['submitted', 'under_review'].includes(loan.status)) {
-      res.status(400).json({ success: false, message: 'Can only assign to submitted or under_review applications' })
-      return
-    }
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
+    if (!['submitted', 'under_review'].includes(loan.status)) { sendError(res, 'Can only assign to submitted or under_review applications', 400); return }
 
     const before = { assignedUnderwriterId: loan.assignedUnderwriterId, status: loan.status }
-
     loan.assignedUnderwriterId = new Types.ObjectId(req.user!.userId)
     loan.status = 'under_review'
-    loan.statusHistory.push({
-      status: 'under_review',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note: 'Assigned to underwriter',
-    })
+    loan.statusHistory.push({ status: 'under_review', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: 'Assigned to underwriter' })
     await loan.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.update',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      changes: {
-        status: { before: before.status, after: 'under_review' },
-        assignedUnderwriterId: { before: before.assignedUnderwriterId, after: req.user!.userId },
-      },
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.update', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before: before.status, after: 'under_review' } }, timestamp: new Date() }).catch(() => {})
 
-    // Notify applicant
     const applicant = await User.findById(loan.applicantUserId)
     if (applicant) {
-      Notification.create({
-        userId: applicant._id,
-        type: 'loan_under_review',
-        title: 'Loan under review',
-        message: 'Your loan application is now being reviewed by an underwriter.',
-        entityType: 'loan_application',
-        entityId: loan._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: applicant._id, type: 'loan_under_review', title: 'Loan under review', message: 'Your loan application is now being reviewed by an underwriter.', entityType: 'loan_application', entityId: loan._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, loan })
+    sendSuccess(res, { loan })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // POST /api/loans/:id/request-documents
 export const requestDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) {
-      res.status(403).json({ success: false, message: 'Only underwriters can request documents' })
-      return
-    }
+    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can request documents', 403); return }
 
     const { note } = req.body
     const loan = await LoanApplication.findOne({ _id: req.params.id, isDeleted: false })
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
 
     loan.status = 'documents_requested'
-    loan.statusHistory.push({
-      status: 'documents_requested',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note,
-    })
+    loan.statusHistory.push({ status: 'documents_requested', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note })
     await loan.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.update',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      changes: { status: { before: 'under_review', after: 'documents_requested' } },
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.update', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before: 'under_review', after: 'documents_requested' } }, timestamp: new Date() }).catch(() => {})
 
     const applicant = await User.findById(loan.applicantUserId)
     if (applicant) {
-      Notification.create({
-        userId: applicant._id,
-        type: 'documents_requested',
-        title: 'Documents required',
-        message: note || 'The underwriter has requested additional documents for your loan application.',
-        entityType: 'loan_application',
-        entityId: loan._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: applicant._id, type: 'documents_requested', title: 'Documents required', message: note || 'The underwriter has requested additional documents.', entityType: 'loan_application', entityId: loan._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, loan })
+    sendSuccess(res, { loan })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// POST /api/loans/:id/approve
+// POST /api/loans/:id/approve — FIX 5: accept interestRate or approvedInterestRate
 export const approveLoan = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) {
-      res.status(403).json({ success: false, message: 'Only underwriters can approve loans' })
-      return
-    }
+    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can approve loans', 403); return }
 
-    const { approvedAmount, approvedInterestRate, approvedTenureMonths, emiAmount, note } = req.body
+    const { approvedAmount, approvedInterestRate, interestRate, approvedTenureMonths, emiAmount, note } = req.body
+    const resolvedInterestRate = approvedInterestRate ?? interestRate  // FIX 5
 
-    if (!approvedAmount || !approvedInterestRate || !approvedTenureMonths) {
-      res.status(400).json({ success: false, message: 'approvedAmount, approvedInterestRate and approvedTenureMonths are required' })
-      return
+    if (!approvedAmount || !resolvedInterestRate) {
+      sendError(res, 'approvedAmount and interestRate are required', 400); return
     }
 
     const loan = await LoanApplication.findOne({ _id: req.params.id, isDeleted: false })
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
-
-    if (!['under_review', 'documents_requested'].includes(loan.status)) {
-      res.status(400).json({ success: false, message: 'Only under_review or documents_requested loans can be approved' })
-      return
-    }
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
+    if (!['under_review', 'documents_requested'].includes(loan.status)) { sendError(res, 'Only under_review or documents_requested loans can be approved', 400); return }
 
     const before = loan.status
-
     loan.status = 'approved'
     loan.approvedAmount = approvedAmount
-    loan.approvedInterestRate = approvedInterestRate
-    loan.approvedTenureMonths = approvedTenureMonths
+    loan.approvedInterestRate = resolvedInterestRate
+    loan.approvedTenureMonths = approvedTenureMonths ?? loan.requestedTenureMonths  // FIX 5 fallback
     if (emiAmount) loan.emiAmount = emiAmount
-    loan.statusHistory.push({
-      status: 'approved',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note,
-    })
+    loan.statusHistory.push({ status: 'approved', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note })
     await loan.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.approve',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      changes: { status: { before, after: 'approved' } },
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.approve', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before, after: 'approved' } }, timestamp: new Date() }).catch(() => {})
 
     const applicant = await User.findById(loan.applicantUserId)
     if (applicant) {
-      Notification.create({
-        userId: applicant._id,
-        type: 'loan_approved',
-        title: 'Loan approved! 🎉',
-        message: `Your loan of ₹${(approvedAmount / 100).toLocaleString('en-IN')} has been approved.`,
-        entityType: 'loan_application',
-        entityId: loan._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: applicant._id, type: 'loan_approved', title: 'Loan approved! 🎉', message: `Your loan of ₹${(approvedAmount / 100).toLocaleString('en-IN')} has been approved.`, entityType: 'loan_application', entityId: loan._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, loan })
+    sendSuccess(res, { loan })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // POST /api/loans/:id/reject
 export const rejectLoan = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) {
-      res.status(403).json({ success: false, message: 'Only underwriters can reject loans' })
-      return
-    }
+    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can reject loans', 403); return }
 
     const { reason, note } = req.body
-    if (!reason) {
-      res.status(400).json({ success: false, message: 'Rejection reason is required' })
-      return
-    }
+    if (!reason) { sendError(res, 'Rejection reason is required', 400); return }
 
     const loan = await LoanApplication.findOne({ _id: req.params.id, isDeleted: false })
-    if (!loan) {
-      res.status(404).json({ success: false, message: 'Loan application not found' })
-      return
-    }
-
-    if (!['under_review', 'documents_requested', 'submitted'].includes(loan.status)) {
-      res.status(400).json({ success: false, message: `Cannot reject a loan with status '${loan.status}'` })
-      return
-    }
+    if (!loan) { sendError(res, 'Loan application not found', 404); return }
+    if (!['under_review', 'documents_requested', 'submitted'].includes(loan.status)) { sendError(res, `Cannot reject a loan with status '${loan.status}'`, 400); return }
 
     const before = loan.status
     loan.status = 'rejected'
     loan.rejectionReason = reason
-    loan.statusHistory.push({
-      status: 'rejected',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note: note || reason,
-    })
+    loan.statusHistory.push({ status: 'rejected', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: note || reason })
     await loan.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'loan.reject',
-      entityType: 'LoanApplication',
-      entityId: loan._id,
-      changes: { status: { before, after: 'rejected' } },
-      note: reason,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.reject', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before, after: 'rejected' } }, note: reason, timestamp: new Date() }).catch(() => {})
 
     const applicant = await User.findById(loan.applicantUserId)
     if (applicant) {
-      Notification.create({
-        userId: applicant._id,
-        type: 'loan_rejected',
-        title: 'Loan application update',
-        message: `Your loan application was not approved at this time.`,
-        entityType: 'loan_application',
-        entityId: loan._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: applicant._id, type: 'loan_rejected', title: 'Loan application update', message: 'Your loan application was not approved at this time.', entityType: 'loan_application', entityId: loan._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, loan })
+    sendSuccess(res, { loan })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
