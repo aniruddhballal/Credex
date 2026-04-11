@@ -1,38 +1,26 @@
 import { Response } from 'express'
 import { Types } from 'mongoose'
 import Notification from '../models/Notification'
+import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
-// GET /api/notifications
+// GET /api/notifications — FIX 11: accept cursor param
 export const listNotifications = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { unreadOnly, lastId, limit = '20' } = req.query
+    const { unreadOnly, lastId, cursor, limit = '20' } = req.query
     const pageLimit = Math.min(parseInt(limit as string), 50)
-
-    const filter: Record<string, unknown> = {
-      userId: new Types.ObjectId(req.user!.userId),
-    }
+    const filter: Record<string, unknown> = { userId: new Types.ObjectId(req.user!.userId) }
 
     if (unreadOnly === 'true') filter.isRead = false
-    if (lastId) filter._id = { $lt: new Types.ObjectId(lastId as string) }
+    const resolvedCursor = (lastId ?? cursor) as string | undefined
+    if (resolvedCursor) filter._id = { $lt: new Types.ObjectId(resolvedCursor) }
 
-    const notifications = await Notification.find(filter)
-      .sort({ createdAt: -1 })
-      .limit(pageLimit)
+    const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(pageLimit)
+    const unreadCount = await Notification.countDocuments({ userId: new Types.ObjectId(req.user!.userId), isRead: false })
 
-    const unreadCount = await Notification.countDocuments({
-      userId: new Types.ObjectId(req.user!.userId),
-      isRead: false,
-    })
-
-    res.json({
-      success: true,
-      notifications,
-      unreadCount,
-      nextCursor: notifications.length === pageLimit ? notifications[notifications.length - 1]._id : null,
-    })
+    sendPaginated(res, notifications, notifications.length === pageLimit ? notifications[notifications.length - 1]._id.toString() : null)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -44,15 +32,10 @@ export const markAsRead = async (req: AuthRequest, res: Response): Promise<void>
       { isRead: true, readAt: new Date() },
       { new: true }
     )
-
-    if (!notification) {
-      res.status(404).json({ success: false, message: 'Notification not found' })
-      return
-    }
-
-    res.json({ success: true, notification })
+    if (!notification) { sendError(res, 'Notification not found', 404); return }
+    sendSuccess(res, { notification })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -63,9 +46,8 @@ export const markAllAsRead = async (req: AuthRequest, res: Response): Promise<vo
       { userId: new Types.ObjectId(req.user!.userId), isRead: false },
       { isRead: true, readAt: new Date() }
     )
-
-    res.json({ success: true, message: 'All notifications marked as read' })
+    sendSuccess(res, null, 'All notifications marked as read')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
