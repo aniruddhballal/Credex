@@ -18,6 +18,9 @@ import imageRoutes from './routes/image.routes'
 import creditScoreRoutes from './routes/creditScore.routes'
 import adminRoutes from './routes/admin.routes'
 import { ipWhitelistMiddleware } from './middleware/ipWhitelist'
+import { buyerRouter, supplierRouter } from './routes/dashboard.routes'
+import underwriterRoutes from './routes/underwriter.routes'
+import optimizerRoutes from './routes/optimizer.routes'
 
 const app = express()
 const PORT = process.env.PORT || 5000
@@ -44,6 +47,10 @@ app.use('/api/chat', chatRoutes)
 app.use('/api/documents', documentRoutes)
 app.use('/api/images', imageRoutes)
 app.use('/api/credit-scores', creditScoreRoutes)
+app.use('/api/buyer', buyerRouter)
+app.use('/api/supplier', supplierRouter)
+app.use('/api/underwriter', underwriterRoutes)
+app.use('/api/optimizer', optimizerRoutes)
 
 // Admin routes — IP-whitelisted at middleware level before any handler runs
 app.use('/api/admin', ipWhitelistMiddleware, adminRoutes)
