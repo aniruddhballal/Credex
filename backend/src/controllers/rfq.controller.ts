@@ -1,17 +1,17 @@
 import { Request, Response } from 'express'
 import { Types } from 'mongoose'
-import RFQ, { INegotiationEntry } from '../models/RFQ'
+import RFQ from '../models/RFQ'
 import Product from '../models/Product'
 import User from '../models/User'
 import Company from '../models/Company'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
+import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
-  req.socket.remoteAddress ||
-  'unknown'
+  req.socket.remoteAddress || 'unknown'
 
 const getUserCompany = async (userId: string) => {
   const user = await User.findById(userId)
@@ -20,57 +20,56 @@ const getUserCompany = async (userId: string) => {
   return { user, company }
 }
 
-// Find the user who owns a company (for notifications)
 const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.ObjectId | null> => {
   const company = await Company.findById(companyId)
   const owner = company?.members.find((m) => m.role === 'owner')
   return owner?.userId ?? null
 }
 
-// POST /api/rfqs
-// Buyer creates an RFQ against a product
+// POST /api/rfqs — FIX 7: accept both field naming conventions
 export const createRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { user, company: buyerCompany } = await getUserCompany(req.user!.userId)
+    const { company: buyerCompany } = await getUserCompany(req.user!.userId)
     if (!buyerCompany || !['buyer', 'both'].includes(buyerCompany.type)) {
-      res.status(403).json({ success: false, message: 'Only buyers can create RFQs' })
-      return
+      sendError(res, 'Only buyers can create RFQs', 403); return
     }
 
     const {
-      productId, quantity, financingMethod,
-      paymentDeadlineDays, penaltyRate, proposedPrice, message,
+      productId, proposedPrice, message,
+      // accept both naming conventions
+      quantity, proposedQuantity,
+      financingMethod, proposedFinancingMethod,
+      paymentDeadlineDays, proposedPaymentDeadlineDays,
+      penaltyRate, proposedPenaltyRate,
     } = req.body
 
-    if (!productId || !quantity || !financingMethod) {
-      res.status(400).json({ success: false, message: 'productId, quantity and financingMethod are required' })
-      return
+    const resolvedQuantity = quantity ?? proposedQuantity
+    const resolvedFinancing = financingMethod ?? proposedFinancingMethod
+    const resolvedDeadlineDays = paymentDeadlineDays ?? proposedPaymentDeadlineDays
+    const resolvedPenaltyRate = penaltyRate ?? proposedPenaltyRate
+
+    if (!productId || !resolvedQuantity || !resolvedFinancing) {
+      sendError(res, 'productId, quantity and financingMethod are required', 400); return
     }
 
     const product = await Product.findOne({ _id: productId, isDeleted: false, isAvailable: true })
-    if (!product) {
-      res.status(404).json({ success: false, message: 'Product not found or unavailable' })
-      return
-    }
+    if (!product) { sendError(res, 'Product not found or unavailable', 404); return }
 
-    // Prevent buying from yourself
     if (product.supplierId.toString() === buyerCompany._id.toString()) {
-      res.status(400).json({ success: false, message: 'You cannot create an RFQ for your own product' })
-      return
+      sendError(res, 'You cannot create an RFQ for your own product', 400); return
     }
 
     const price = proposedPrice ?? product.basePrice
-    const deadlineDays = paymentDeadlineDays ?? product.defaultPaymentDeadlineDays
-    const penalty = penaltyRate ?? product.defaultPenaltyRate
-
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
+    const deadlineDays = resolvedDeadlineDays ?? product.defaultPaymentDeadlineDays
+    const penalty = resolvedPenaltyRate ?? product.defaultPenaltyRate
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
 
     const historyEntry = {
       by: 'buyer' as const,
       byUserId: new Types.ObjectId(req.user!.userId),
       proposedPrice: price,
-      proposedQuantity: quantity,
-      proposedFinancingMethod: financingMethod,
+      proposedQuantity: resolvedQuantity,
+      proposedFinancingMethod: resolvedFinancing,
       proposedPaymentDeadlineDays: deadlineDays,
       proposedPenaltyRate: penalty,
       message,
@@ -82,98 +81,65 @@ export const createRFQ = async (req: AuthRequest, res: Response): Promise<void> 
       supplierId: product.supplierId,
       productId: product._id,
       buyerUserId: new Types.ObjectId(req.user!.userId),
-      currentPrice: price,
-      currentQuantity: quantity,
-      currentFinancingMethod: financingMethod,
+      currentPrice: price, currentQuantity: resolvedQuantity,
+      currentFinancingMethod: resolvedFinancing,
       currentPaymentDeadlineDays: deadlineDays,
       currentPenaltyRate: penalty,
-      lastMovedBy: 'buyer',
-      lastMovedAt: new Date(),
-      status: 'pending',
-      expiresAt,
+      lastMovedBy: 'buyer', lastMovedAt: new Date(),
+      status: 'pending', expiresAt,
       history: [historyEntry],
-      note: message,
-      isDeleted: false,
+      note: message, isDeleted: false,
     })
 
     AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'rfq.create',
-      entityType: 'RFQ',
-      entityId: rfq._id,
+      performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role,
+      ipAddress: getIp(req), action: 'rfq.create', entityType: 'RFQ', entityId: rfq._id,
       timestamp: new Date(),
-    }).catch(() => { })
+    }).catch(() => {})
 
-    // Notify supplier
     const supplierOwnerId = await getCompanyOwnerUserId(product.supplierId)
     if (supplierOwnerId) {
       Notification.create({
-        userId: supplierOwnerId,
-        type: 'rfq_received',
-        title: 'New RFQ received',
+        userId: supplierOwnerId, type: 'rfq_received', title: 'New RFQ received',
         message: `${buyerCompany.name} sent an RFQ for ${product.name}`,
-        entityType: 'rfq',
-        entityId: rfq._id,
-        isRead: false,
-      }).catch(() => { })
+        entityType: 'rfq', entityId: rfq._id, isRead: false,
+      }).catch(() => {})
     }
 
-    res.status(201).json({ success: true, rfq })
+    sendSuccess(res, { rfq }, undefined, 201)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // POST /api/rfqs/:id/counter
-// Either party counters with new terms
 export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { user: authUser, company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    const { company } = await getUserCompany(req.user!.userId)
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
-    if (!rfq) {
-      res.status(404).json({ success: false, message: 'RFQ not found' })
-      return
-    }
+    if (!rfq) { sendError(res, 'RFQ not found', 404); return }
 
     if (!['pending', 'countered'].includes(rfq.status)) {
-      res.status(400).json({ success: false, message: `Cannot counter an RFQ with status '${rfq.status}'` })
-      return
+      sendError(res, `Cannot counter an RFQ with status '${rfq.status}'`, 400); return
     }
 
     if (new Date() > rfq.expiresAt) {
-      rfq.status = 'expired'
-      await rfq.save()
-      res.status(400).json({ success: false, message: 'This RFQ has expired' })
-      return
+      rfq.status = 'expired'; await rfq.save()
+      sendError(res, 'This RFQ has expired', 400); return
     }
 
-    // Determine who is countering
     const isBuyer = rfq.buyerId.toString() === company._id.toString()
     const isSupplier = rfq.supplierId.toString() === company._id.toString()
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this RFQ', 403); return }
 
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this RFQ' })
-      return
-    }
-
-    // Cannot counter your own last move
-    const moverRole: INegotiationEntry['by'] = isBuyer ? 'buyer' : 'supplier'
+    const moverRole = isBuyer ? 'buyer' : 'supplier'
     if (rfq.lastMovedBy === moverRole) {
-      res.status(400).json({ success: false, message: 'Waiting for the other party to respond' })
-      return
+      sendError(res, 'Waiting for the other party to respond', 400); return
     }
 
-    const {
-      proposedPrice, quantity, financingMethod,
-      paymentDeadlineDays, penaltyRate, message,
-    } = req.body
+    const { proposedPrice, quantity, financingMethod, paymentDeadlineDays, penaltyRate, message } = req.body
 
     const newPrice = proposedPrice ?? rfq.currentPrice
     const newQty = quantity ?? rfq.currentQuantity
@@ -181,129 +147,63 @@ export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void>
     const newDeadline = paymentDeadlineDays ?? rfq.currentPaymentDeadlineDays
     const newPenalty = penaltyRate ?? rfq.currentPenaltyRate
 
-    const entry: INegotiationEntry = {
-      by: moverRole,
-      byUserId: new Types.ObjectId(req.user!.userId),
-      proposedPrice: newPrice,
-      proposedQuantity: newQty,
-      proposedFinancingMethod: newMethod,
-      proposedPaymentDeadlineDays: newDeadline,
-      proposedPenaltyRate: newPenalty,
-      message,
-      at: new Date(),
-    }
-
-    rfq.history.push(entry)
-    rfq.currentPrice = newPrice
-    rfq.currentQuantity = newQty
-    rfq.currentFinancingMethod = newMethod
-    rfq.currentPaymentDeadlineDays = newDeadline
-    rfq.currentPenaltyRate = newPenalty
-    rfq.lastMovedBy = moverRole
-    rfq.lastMovedAt = new Date()
-    rfq.status = 'countered'
-
+    rfq.history.push({ by: moverRole, byUserId: new Types.ObjectId(req.user!.userId), proposedPrice: newPrice, proposedQuantity: newQty, proposedFinancingMethod: newMethod, proposedPaymentDeadlineDays: newDeadline, proposedPenaltyRate: newPenalty, message, at: new Date() })
+    rfq.currentPrice = newPrice; rfq.currentQuantity = newQty
+    rfq.currentFinancingMethod = newMethod; rfq.currentPaymentDeadlineDays = newDeadline
+    rfq.currentPenaltyRate = newPenalty; rfq.lastMovedBy = moverRole
+    rfq.lastMovedAt = new Date(); rfq.status = 'countered'
     await rfq.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'rfq.counter',
-      entityType: 'RFQ',
-      entityId: rfq._id,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'rfq.counter', entityType: 'RFQ', entityId: rfq._id, timestamp: new Date() }).catch(() => {})
 
-    // Notify the other party
     const notifyCompanyId = isBuyer ? rfq.supplierId : rfq.buyerId
     const notifyUserId = await getCompanyOwnerUserId(notifyCompanyId)
     if (notifyUserId) {
-      Notification.create({
-        userId: notifyUserId,
-        type: 'rfq_countered',
-        title: 'RFQ countered',
-        message: `${company.name} sent a counter-offer on your RFQ`,
-        entityType: 'rfq',
-        entityId: rfq._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: notifyUserId, type: 'rfq_countered', title: 'RFQ countered', message: `${company.name} sent a counter-offer`, entityType: 'rfq', entityId: rfq._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, rfq })
+    sendSuccess(res, { rfq })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // POST /api/rfqs/:id/accept
-// Either party accepts the current terms → triggers PO creation
 export const acceptRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
-    if (!rfq) {
-      res.status(404).json({ success: false, message: 'RFQ not found' })
-      return
-    }
+    if (!rfq) { sendError(res, 'RFQ not found', 404); return }
 
     if (!['pending', 'countered'].includes(rfq.status)) {
-      res.status(400).json({ success: false, message: `Cannot accept an RFQ with status '${rfq.status}'` })
-      return
+      sendError(res, `Cannot accept an RFQ with status '${rfq.status}'`, 400); return
     }
 
     if (new Date() > rfq.expiresAt) {
-      rfq.status = 'expired'
-      await rfq.save()
-      res.status(400).json({ success: false, message: 'This RFQ has expired' })
-      return
+      rfq.status = 'expired'; await rfq.save()
+      sendError(res, 'This RFQ has expired', 400); return
     }
 
     const isBuyer = rfq.buyerId.toString() === company._id.toString()
     const isSupplier = rfq.supplierId.toString() === company._id.toString()
-
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this RFQ' })
-      return
-    }
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this RFQ', 403); return }
 
     rfq.status = 'accepted'
     await rfq.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'rfq.accept',
-      entityType: 'RFQ',
-      entityId: rfq._id,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'rfq.accept', entityType: 'RFQ', entityId: rfq._id, timestamp: new Date() }).catch(() => {})
 
-    // Notify the other party
     const notifyCompanyId = isBuyer ? rfq.supplierId : rfq.buyerId
     const notifyUserId = await getCompanyOwnerUserId(notifyCompanyId)
     if (notifyUserId) {
-      Notification.create({
-        userId: notifyUserId,
-        type: 'rfq_accepted',
-        title: 'RFQ accepted',
-        message: `${company.name} accepted the RFQ. A Purchase Order will be created.`,
-        entityType: 'rfq',
-        entityId: rfq._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: notifyUserId, type: 'rfq_accepted', title: 'RFQ accepted', message: `${company.name} accepted the RFQ.${isBuyer ? ' Proceed to create a Purchase Order.' : ' Waiting for buyer to create a Purchase Order.'}`, entityType: 'rfq', entityId: rfq._id, isRead: false }).catch(() => {})
     }
 
-    // Return the accepted rfq — PO creation is a separate step (POST /api/purchase-orders)
-    res.json({ success: true, rfq, message: 'RFQ accepted. Proceed to create a Purchase Order.' })
+    sendSuccess(res, { rfq }, isBuyer ? 'RFQ accepted. Proceed to create a Purchase Order.' : 'RFQ accepted. Waiting for buyer to create a Purchase Order.')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -311,109 +211,63 @@ export const acceptRFQ = async (req: AuthRequest, res: Response): Promise<void> 
 export const declineRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
-    if (!rfq) {
-      res.status(404).json({ success: false, message: 'RFQ not found' })
-      return
-    }
-
-    if (!['pending', 'countered'].includes(rfq.status)) {
-      res.status(400).json({ success: false, message: `Cannot decline an RFQ with status '${rfq.status}'` })
-      return
-    }
+    if (!rfq) { sendError(res, 'RFQ not found', 404); return }
+    if (!['pending', 'countered'].includes(rfq.status)) { sendError(res, `Cannot decline an RFQ with status '${rfq.status}'`, 400); return }
 
     const isBuyer = rfq.buyerId.toString() === company._id.toString()
     const isSupplier = rfq.supplierId.toString() === company._id.toString()
-
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this RFQ' })
-      return
-    }
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this RFQ', 403); return }
 
     rfq.status = 'declined'
     await rfq.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'rfq.decline',
-      entityType: 'RFQ',
-      entityId: rfq._id,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'rfq.decline', entityType: 'RFQ', entityId: rfq._id, timestamp: new Date() }).catch(() => {})
 
     const notifyCompanyId = isBuyer ? rfq.supplierId : rfq.buyerId
     const notifyUserId = await getCompanyOwnerUserId(notifyCompanyId)
     if (notifyUserId) {
-      Notification.create({
-        userId: notifyUserId,
-        type: 'rfq_declined',
-        title: 'RFQ declined',
-        message: `${company.name} declined the RFQ.`,
-        entityType: 'rfq',
-        entityId: rfq._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: notifyUserId, type: 'rfq_declined', title: 'RFQ declined', message: `${company.name} declined the RFQ.`, entityType: 'rfq', entityId: rfq._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, message: 'RFQ declined' })
+    sendSuccess(res, null, 'RFQ declined')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/rfqs/:id
+// GET /api/rfqs/:id — FIX 16: populate buyer, supplier, product
 export const getRFQById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
       .populate('productId', 'name images category basePrice priceUnit')
-      .populate('buyerId', 'name logo isVerified trustBadge')
-      .populate('supplierId', 'name logo isVerified trustBadge')
+      .populate('buyerId', 'name logo type trustBadge isVerified')
+      .populate('supplierId', 'name logo type trustBadge isVerified')
 
-    if (!rfq) {
-      res.status(404).json({ success: false, message: 'RFQ not found' })
-      return
-    }
+    if (!rfq) { sendError(res, 'RFQ not found', 404); return }
 
-    const isBuyer = rfq.buyerId._id?.toString() === company._id.toString() ||
-      rfq.buyerId.toString() === company._id.toString()
-    const isSupplier = rfq.supplierId._id?.toString() === company._id.toString() ||
-      rfq.supplierId.toString() === company._id.toString()
+    const isBuyer = rfq.buyerId._id?.toString() === company._id.toString() || rfq.buyerId.toString() === company._id.toString()
+    const isSupplier = rfq.supplierId._id?.toString() === company._id.toString() || rfq.supplierId.toString() === company._id.toString()
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this RFQ', 403); return }
 
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this RFQ' })
-      return
-    }
-
-    res.json({ success: true, rfq })
+    sendSuccess(res, { rfq })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/rfqs?role=buyer|supplier&status=pending&lastId=...
+// GET /api/rfqs — FIX 11: accept cursor param
 export const listRFQs = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
-    const { role, status, lastId, limit = '20' } = req.query
-
+    const { role, status, lastId, cursor, limit = '20' } = req.query
     const filter: Record<string, unknown> = { isDeleted: false }
 
     if (role === 'buyer') filter.buyerId = company._id
@@ -421,10 +275,10 @@ export const listRFQs = async (req: AuthRequest, res: Response): Promise<void> =
     else filter.$or = [{ buyerId: company._id }, { supplierId: company._id }]
 
     if (status) filter.status = status
-    if (lastId) filter._id = { $gt: new Types.ObjectId(lastId as string) }
+    const resolvedCursor = (lastId ?? cursor) as string | undefined
+    if (resolvedCursor) filter._id = { $gt: new Types.ObjectId(resolvedCursor) }
 
     const pageLimit = Math.min(parseInt(limit as string), 50)
-
     const rfqs = await RFQ.find(filter)
       .populate('productId', 'name images category')
       .populate('buyerId', 'name logo')
@@ -432,12 +286,8 @@ export const listRFQs = async (req: AuthRequest, res: Response): Promise<void> =
       .sort({ updatedAt: -1 })
       .limit(pageLimit)
 
-    res.json({
-      success: true,
-      rfqs,
-      nextCursor: rfqs.length === pageLimit ? rfqs[rfqs.length - 1]._id : null,
-    })
+    sendPaginated(res, rfqs, rfqs.length === pageLimit ? rfqs[rfqs.length - 1]._id.toString() : null)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
