@@ -7,12 +7,12 @@ import Company from '../models/Company'
 import Product from '../models/Product'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
+import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
-  req.socket.remoteAddress ||
-  'unknown'
+  req.socket.remoteAddress || 'unknown'
 
 const getUserCompany = async (userId: string) => {
   const user = await User.findById(userId)
@@ -28,162 +28,88 @@ const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.O
 }
 
 // POST /api/purchase-orders
-// Buyer creates PO from an accepted RFQ
 export const createPurchaseOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company: buyerCompany } = await getUserCompany(req.user!.userId)
     if (!buyerCompany || !['buyer', 'both'].includes(buyerCompany.type)) {
-      res.status(403).json({ success: false, message: 'Only buyers can create purchase orders' })
-      return
+      sendError(res, 'Only buyers can create purchase orders', 403); return
     }
 
     const { rfqId } = req.body
-    if (!rfqId) {
-      res.status(400).json({ success: false, message: 'rfqId is required' })
-      return
-    }
+    if (!rfqId) { sendError(res, 'rfqId is required', 400); return }
 
     const rfq = await RFQ.findOne({ _id: rfqId, isDeleted: false })
-    if (!rfq) {
-      res.status(404).json({ success: false, message: 'RFQ not found' })
-      return
-    }
+    if (!rfq) { sendError(res, 'RFQ not found', 404); return }
+    if (rfq.status !== 'accepted') { sendError(res, 'RFQ must be accepted before creating a PO', 400); return }
+    if (rfq.buyerId.toString() !== buyerCompany._id.toString()) { sendError(res, 'This RFQ does not belong to your company', 403); return }
 
-    if (rfq.status !== 'accepted') {
-      res.status(400).json({ success: false, message: 'RFQ must be accepted before creating a PO' })
-      return
-    }
-
-    if (rfq.buyerId.toString() !== buyerCompany._id.toString()) {
-      res.status(403).json({ success: false, message: 'This RFQ does not belong to your company' })
-      return
-    }
-
-    // Check no PO already exists for this RFQ
     const existing = await PurchaseOrder.findOne({ rfqId: rfq._id, isDeleted: false })
-    if (existing) {
-      res.status(409).json({ success: false, message: 'A purchase order already exists for this RFQ' })
-      return
-    }
+    if (existing) { sendError(res, 'A purchase order already exists for this RFQ', 409); return }
 
     const totalPrice = rfq.currentPrice * rfq.currentQuantity
-    const paymentDeadline = new Date(
-      Date.now() + rfq.currentPaymentDeadlineDays * 24 * 60 * 60 * 1000
-    )
+    const paymentDeadline = new Date(Date.now() + rfq.currentPaymentDeadlineDays * 24 * 60 * 60 * 1000)
 
     const po = await PurchaseOrder.create({
-      rfqId: rfq._id,
-      buyerId: rfq.buyerId,
-      supplierId: rfq.supplierId,
-      productId: rfq.productId,
+      rfqId: rfq._id, buyerId: rfq.buyerId, supplierId: rfq.supplierId, productId: rfq.productId,
       buyerUserId: new Types.ObjectId(req.user!.userId),
-      quantity: rfq.currentQuantity,
-      unitPrice: rfq.currentPrice,
-      totalPrice,
-      currency: 'INR',
-      financingMethod: rfq.currentFinancingMethod,
-      paymentDeadline,
+      quantity: rfq.currentQuantity, unitPrice: rfq.currentPrice, totalPrice, currency: 'INR',
+      financingMethod: rfq.currentFinancingMethod, paymentDeadline,
       penaltyRate: rfq.currentPenaltyRate,
-      amountPaid: 0,
-      amountRemaining: totalPrice,
-      paymentStatus: 'unpaid',
-      fulfilmentStatus: 'pending',
-      status: 'confirmed',
-      statusHistory: [{
-        status: 'confirmed',
-        changedBy: new Types.ObjectId(req.user!.userId),
-        changedAt: new Date(),
-        note: 'PO created from accepted RFQ',
-      }],
-      buyerReviewed: false,
-      supplierReviewed: false,
-      isDeleted: false,
+      amountPaid: 0, amountRemaining: totalPrice,
+      paymentStatus: 'unpaid', fulfilmentStatus: 'pending', status: 'confirmed',
+      statusHistory: [{ status: 'confirmed', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: 'PO created from accepted RFQ' }],
+      buyerReviewed: false, supplierReviewed: false, isDeleted: false,
     })
 
-    // Mark RFQ as converted
     rfq.status = 'converted_to_po'
     await rfq.save()
 
-    // Update product lastPurchasedAt
-    Product.findByIdAndUpdate(rfq.productId, { lastPurchasedAt: new Date() }).catch(() => { })
+    Product.findByIdAndUpdate(rfq.productId, { lastPurchasedAt: new Date() }).catch(() => {})
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'po.create',
-      entityType: 'PurchaseOrder',
-      entityId: po._id,
-      note: `PO created from RFQ ${rfqId}`,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'po.create', entityType: 'PurchaseOrder', entityId: po._id, note: `PO created from RFQ ${rfqId}`, timestamp: new Date() }).catch(() => {})
 
     const supplierOwnerId = await getCompanyOwnerUserId(rfq.supplierId)
     if (supplierOwnerId) {
-      Notification.create({
-        userId: supplierOwnerId,
-        type: 'po_created',
-        title: 'New Purchase Order',
-        message: `${buyerCompany.name} has created a Purchase Order.`,
-        entityType: 'purchase_order',
-        entityId: po._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: supplierOwnerId, type: 'po_created', title: 'New Purchase Order', message: `${buyerCompany.name} has created a Purchase Order.`, entityType: 'purchase_order', entityId: po._id, isRead: false }).catch(() => {})
     }
 
-    res.status(201).json({ success: true, purchaseOrder: po })
+    sendSuccess(res, { purchaseOrder: po }, undefined, 201)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/purchase-orders/:id
+// GET /api/purchase-orders/:id — FIX 17: full population
 export const getPurchaseOrderById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
-      .populate('productId', 'name images category priceUnit')
+      .populate('productId', 'name images category priceUnit basePrice')
       .populate('buyerId', 'name logo isVerified trustBadge city state')
       .populate('supplierId', 'name logo isVerified trustBadge city state')
-      .populate('rfqId', 'history currentFinancingMethod')
+      .populate('rfqId', 'history currentFinancingMethod currentPaymentDeadlineDays')
 
-    if (!po) {
-      res.status(404).json({ success: false, message: 'Purchase order not found' })
-      return
-    }
+    if (!po) { sendError(res, 'Purchase order not found', 404); return }
 
-    const isBuyer = po.buyerId._id?.toString() === company._id.toString() ||
-      po.buyerId.toString() === company._id.toString()
-    const isSupplier = po.supplierId._id?.toString() === company._id.toString() ||
-      po.supplierId.toString() === company._id.toString()
+    const isBuyer = po.buyerId._id?.toString() === company._id.toString() || po.buyerId.toString() === company._id.toString()
+    const isSupplier = po.supplierId._id?.toString() === company._id.toString() || po.supplierId.toString() === company._id.toString()
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this PO', 403); return }
 
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this PO' })
-      return
-    }
-
-    res.json({ success: true, purchaseOrder: po })
+    sendSuccess(res, { purchaseOrder: po })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/purchase-orders
+// GET /api/purchase-orders — FIX 11 + FIX 15
 export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
-    const { role, status, paymentStatus, lastId, limit = '20' } = req.query
-
+    const { role, status, paymentStatus, lastId, cursor, limit = '20' } = req.query
     const filter: Record<string, unknown> = { isDeleted: false }
 
     if (role === 'buyer') filter.buyerId = company._id
@@ -191,11 +117,17 @@ export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promi
     else filter.$or = [{ buyerId: company._id }, { supplierId: company._id }]
 
     if (status) filter.status = status
-    if (paymentStatus) filter.paymentStatus = paymentStatus
-    if (lastId) filter._id = { $lt: new Types.ObjectId(lastId as string) }
+
+    // FIX 15 — support comma-separated paymentStatus values
+    if (paymentStatus) {
+      const statuses = (paymentStatus as string).split(',').map(s => s.trim())
+      filter.paymentStatus = statuses.length === 1 ? statuses[0] : { $in: statuses }
+    }
+
+    const resolvedCursor = (lastId ?? cursor) as string | undefined
+    if (resolvedCursor) filter._id = { $lt: new Types.ObjectId(resolvedCursor) }
 
     const pageLimit = Math.min(parseInt(limit as string), 50)
-
     const pos = await PurchaseOrder.find(filter)
       .populate('productId', 'name images category')
       .populate('buyerId', 'name logo')
@@ -203,95 +135,47 @@ export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promi
       .sort({ paymentDeadline: 1 })
       .limit(pageLimit)
 
-    res.json({
-      success: true,
-      purchaseOrders: pos,
-      nextCursor: pos.length === pageLimit ? pos[pos.length - 1]._id : null,
-    })
+    sendPaginated(res, pos, pos.length === pageLimit ? pos[pos.length - 1]._id.toString() : null)
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
 // PATCH /api/purchase-orders/:id/fulfilment
-// Supplier updates fulfilment status
 export const updateFulfilmentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const { fulfilmentStatus, note } = req.body
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'completed']
-    if (!validStatuses.includes(fulfilmentStatus)) {
-      res.status(400).json({ success: false, message: 'Invalid fulfilment status' })
-      return
-    }
+    if (!validStatuses.includes(fulfilmentStatus)) { sendError(res, 'Invalid fulfilment status', 400); return }
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
-    if (!po) {
-      res.status(404).json({ success: false, message: 'Purchase order not found' })
-      return
-    }
-
-    if (po.supplierId.toString() !== company._id.toString()) {
-      res.status(403).json({ success: false, message: 'Only the supplier can update fulfilment status' })
-      return
-    }
-
-    if (['completed', 'cancelled'].includes(po.status)) {
-      res.status(400).json({ success: false, message: 'Cannot update a completed or cancelled PO' })
-      return
-    }
+    if (!po) { sendError(res, 'Purchase order not found', 404); return }
+    if (po.supplierId.toString() !== company._id.toString()) { sendError(res, 'Only the supplier can update fulfilment status', 403); return }
+    if (['completed', 'cancelled'].includes(po.status)) { sendError(res, 'Cannot update a completed or cancelled PO', 400); return }
 
     const before = po.fulfilmentStatus
     po.fulfilmentStatus = fulfilmentStatus
-
-    // Auto-update PO status
     if (fulfilmentStatus === 'completed') {
       po.status = po.paymentStatus === 'paid' ? 'completed' : 'in_progress'
     } else if (po.status === 'confirmed') {
       po.status = 'in_progress'
     }
-
-    po.statusHistory.push({
-      status: `fulfilment:${fulfilmentStatus}`,
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note,
-    })
-
+    po.statusHistory.push({ status: `fulfilment:${fulfilmentStatus}`, changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note })
     await po.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'po.update',
-      entityType: 'PurchaseOrder',
-      entityId: po._id,
-      changes: { fulfilmentStatus: { before, after: fulfilmentStatus } },
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'po.update', entityType: 'PurchaseOrder', entityId: po._id, changes: { fulfilmentStatus: { before, after: fulfilmentStatus } }, timestamp: new Date() }).catch(() => {})
 
     const buyerOwnerId = await getCompanyOwnerUserId(po.buyerId)
     if (buyerOwnerId) {
-      Notification.create({
-        userId: buyerOwnerId,
-        type: 'po_confirmed',
-        title: 'Order update',
-        message: `Your order fulfilment status changed to: ${fulfilmentStatus}`,
-        entityType: 'purchase_order',
-        entityId: po._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: buyerOwnerId, type: 'po_confirmed', title: 'Order update', message: `Your order fulfilment status changed to: ${fulfilmentStatus}`, entityType: 'purchase_order', entityId: po._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, purchaseOrder: po })
+    sendSuccess(res, { purchaseOrder: po })
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
 
@@ -299,73 +183,33 @@ export const updateFulfilmentStatus = async (req: AuthRequest, res: Response): P
 export const cancelPurchaseOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    if (!company) { sendError(res, 'No company linked to account', 403); return }
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
-    if (!po) {
-      res.status(404).json({ success: false, message: 'Purchase order not found' })
-      return
-    }
+    if (!po) { sendError(res, 'Purchase order not found', 404); return }
 
     const isBuyer = po.buyerId.toString() === company._id.toString()
     const isSupplier = po.supplierId.toString() === company._id.toString()
-    if (!isBuyer && !isSupplier) {
-      res.status(403).json({ success: false, message: 'You are not a party to this PO' })
-      return
-    }
-
-    if (['completed', 'cancelled'].includes(po.status)) {
-      res.status(400).json({ success: false, message: `Cannot cancel a PO that is already ${po.status}` })
-      return
-    }
-
-    if (po.amountPaid > 0) {
-      res.status(400).json({ success: false, message: 'Cannot cancel a PO with payments recorded. Raise a dispute instead.' })
-      return
-    }
+    if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this PO', 403); return }
+    if (['completed', 'cancelled'].includes(po.status)) { sendError(res, `Cannot cancel a PO that is already ${po.status}`, 400); return }
+    if (po.amountPaid > 0) { sendError(res, 'Cannot cancel a PO with payments recorded. Raise a dispute instead.', 400); return }
 
     const { reason } = req.body
     const before = po.status
     po.status = 'cancelled'
-    po.statusHistory.push({
-      status: 'cancelled',
-      changedBy: new Types.ObjectId(req.user!.userId),
-      changedAt: new Date(),
-      note: reason,
-    })
+    po.statusHistory.push({ status: 'cancelled', changedBy: new Types.ObjectId(req.user!.userId), changedAt: new Date(), note: reason })
     await po.save()
 
-    AuditLog.create({
-      performedBy: new Types.ObjectId(req.user!.userId),
-      performedByRole: req.user!.role,
-      ipAddress: getIp(req),
-      action: 'po.cancel',
-      entityType: 'PurchaseOrder',
-      entityId: po._id,
-      changes: { status: { before, after: 'cancelled' } },
-      note: reason,
-      timestamp: new Date(),
-    }).catch(() => { })
+    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'po.cancel', entityType: 'PurchaseOrder', entityId: po._id, changes: { status: { before, after: 'cancelled' } }, note: reason, timestamp: new Date() }).catch(() => {})
 
     const notifyCompanyId = isBuyer ? po.supplierId : po.buyerId
     const notifyUserId = await getCompanyOwnerUserId(notifyCompanyId)
     if (notifyUserId) {
-      Notification.create({
-        userId: notifyUserId,
-        type: 'po_cancelled',
-        title: 'Purchase Order Cancelled',
-        message: `${company.name} cancelled the purchase order.`,
-        entityType: 'purchase_order',
-        entityId: po._id,
-        isRead: false,
-      }).catch(() => { })
+      Notification.create({ userId: notifyUserId, type: 'po_cancelled', title: 'Purchase Order Cancelled', message: `${company.name} cancelled the purchase order.`, entityType: 'purchase_order', entityId: po._id, isRead: false }).catch(() => {})
     }
 
-    res.json({ success: true, message: 'Purchase order cancelled' })
+    sendSuccess(res, null, 'Purchase order cancelled')
   } catch {
-    res.status(500).json({ success: false, message: 'Server error' })
+    sendError(res, 'Server error', 500)
   }
 }
