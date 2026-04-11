@@ -6,6 +6,7 @@ import User from '../models/User'
 import Company from '../models/Company'
 import Product from '../models/Product'
 import { AuthRequest } from '../middleware/auth'
+import { sendSuccess, sendError } from '../utils/response'
 
 // Multer — memory buffer only, no disk
 export const imageUpload = multer({
@@ -45,7 +46,7 @@ export const uploadProfilePicture = async (req: AuthRequest, res: Response): Pro
     // Delete old image if exists
     if (user.profilePicture) {
       const oldPublicId = extractPublicId(user.profilePicture)
-      if (oldPublicId) deleteImage(oldPublicId).catch(() => { })
+      if (oldPublicId) deleteImage(oldPublicId).catch(() => {})
     }
 
     const { url } = await uploadImage(
@@ -80,7 +81,7 @@ export const uploadCompanyLogo = async (req: AuthRequest, res: Response): Promis
 
     if (company.logo) {
       const oldPublicId = extractPublicId(company.logo)
-      if (oldPublicId) deleteImage(oldPublicId).catch(() => { })
+      if (oldPublicId) deleteImage(oldPublicId).catch(() => {})
     }
 
     const { url } = await uploadImage(
@@ -174,7 +175,7 @@ export const deleteProductImage = async (req: AuthRequest, res: Response): Promi
     }
 
     const publicId = extractPublicId(url)
-    if (publicId) deleteImage(publicId).catch(() => { })
+    if (publicId) deleteImage(publicId).catch(() => {})
 
     product.images = product.images.filter((img) => img !== url)
     await product.save()
