@@ -2,9 +2,9 @@ import { Response } from 'express'
 import multer from 'multer'
 import { uploadImage, deleteImage, CloudinaryFolder } from '../services/cloudinary'
 import User from '../models/User'
-import Company from '../models/Company'
 import Product from '../models/Product'
 import { AuthRequest } from '../middleware/auth'
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 // Multer — memory buffer only, no disk
 export const imageUpload = multer({
@@ -19,13 +19,6 @@ export const imageUpload = multer({
     }
   },
 })
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
 
 // PATCH /api/images/profile
 export const uploadProfilePicture = async (req: AuthRequest, res: Response): Promise<void> => {
@@ -71,10 +64,14 @@ export const uploadCompanyLogo = async (req: AuthRequest, res: Response): Promis
       return
     }
 
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(404).json({ success: false, message: 'No company linked to your account' })
-      return
+    let company
+    try {
+      company = await requireUserCompany(req.user!.userId)
+    } catch (err) {
+      if (err instanceof CompanyRequiredError) {
+        res.status(err.statusCode).json({ success: false, message: err.message }); return
+      }
+      throw err
     }
 
     if (company.logo) {
@@ -107,10 +104,14 @@ export const uploadProductImage = async (req: AuthRequest, res: Response): Promi
       return
     }
 
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No supplier company found' })
-      return
+    let company
+    try {
+      company = await requireUserCompany(req.user!.userId)
+    } catch (err) {
+      if (err instanceof CompanyRequiredError) {
+        res.status(err.statusCode).json({ success: false, message: err.message }); return
+      }
+      throw err
     }
 
     const product = await Product.findOne({
@@ -149,10 +150,14 @@ export const uploadProductImage = async (req: AuthRequest, res: Response): Promi
 // Body: { url } — removes one image from product.images
 export const deleteProductImage = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No supplier company found' })
-      return
+    let company
+    try {
+      company = await requireUserCompany(req.user!.userId)
+    } catch (err) {
+      if (err instanceof CompanyRequiredError) {
+        res.status(err.statusCode).json({ success: false, message: err.message }); return
+      }
+      throw err
     }
 
     const { url } = req.body
