@@ -2,23 +2,16 @@ import { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import RFQ from '../models/RFQ'
 import Product from '../models/Product'
-import User from '../models/User'
 import Company from '../models/Company'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
 import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
 
 const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.ObjectId | null> => {
   const company = await Company.findById(companyId)
@@ -26,17 +19,17 @@ const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.O
   return owner?.userId ?? null
 }
 
-// POST /api/rfqs — FIX 7: accept both field naming conventions
+// POST /api/rfqs
 export const createRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company: buyerCompany } = await getUserCompany(req.user!.userId)
-    if (!buyerCompany || !['buyer', 'both'].includes(buyerCompany.type)) {
+    const buyerCompany = await requireUserCompany(req.user!.userId)
+
+    if (!['buyer', 'both'].includes(buyerCompany.type)) {
       sendError(res, 'Only buyers can create RFQs', 403); return
     }
 
     const {
       productId, proposedPrice, message,
-      // accept both naming conventions
       quantity, proposedQuantity,
       financingMethod, proposedFinancingMethod,
       paymentDeadlineDays, proposedPaymentDeadlineDays,
@@ -107,7 +100,8 @@ export const createRFQ = async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     sendSuccess(res, { rfq }, undefined, 201)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -115,8 +109,7 @@ export const createRFQ = async (req: AuthRequest, res: Response): Promise<void> 
 // POST /api/rfqs/:id/counter
 export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
     if (!rfq) { sendError(res, 'RFQ not found', 404); return }
@@ -163,7 +156,8 @@ export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void>
     }
 
     sendSuccess(res, { rfq })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -171,8 +165,7 @@ export const counterRFQ = async (req: AuthRequest, res: Response): Promise<void>
 // POST /api/rfqs/:id/accept
 export const acceptRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
     if (!rfq) { sendError(res, 'RFQ not found', 404); return }
@@ -202,7 +195,8 @@ export const acceptRFQ = async (req: AuthRequest, res: Response): Promise<void> 
     }
 
     sendSuccess(res, { rfq }, isBuyer ? 'RFQ accepted. Proceed to create a Purchase Order.' : 'RFQ accepted. Waiting for buyer to create a Purchase Order.')
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -210,8 +204,7 @@ export const acceptRFQ = async (req: AuthRequest, res: Response): Promise<void> 
 // POST /api/rfqs/:id/decline
 export const declineRFQ = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
     if (!rfq) { sendError(res, 'RFQ not found', 404); return }
@@ -233,16 +226,16 @@ export const declineRFQ = async (req: AuthRequest, res: Response): Promise<void>
     }
 
     sendSuccess(res, null, 'RFQ declined')
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/rfqs/:id — FIX 16: populate buyer, supplier, product
+// GET /api/rfqs/:id
 export const getRFQById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const rfq = await RFQ.findOne({ _id: req.params.id, isDeleted: false })
       .populate('productId', 'name images category basePrice priceUnit')
@@ -256,16 +249,16 @@ export const getRFQById = async (req: AuthRequest, res: Response): Promise<void>
     if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this RFQ', 403); return }
 
     sendSuccess(res, { rfq })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/rfqs — FIX 11: accept cursor param
+// GET /api/rfqs
 export const listRFQs = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { role, status, lastId, cursor, limit = '20' } = req.query
     const filter: Record<string, unknown> = { isDeleted: false }
@@ -287,7 +280,8 @@ export const listRFQs = async (req: AuthRequest, res: Response): Promise<void> =
       .limit(pageLimit)
 
     sendPaginated(res, rfqs, rfqs.length === pageLimit ? rfqs[rfqs.length - 1]._id.toString() : null)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
