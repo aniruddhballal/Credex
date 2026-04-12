@@ -4,22 +4,15 @@ import Review from '../models/Review'
 import PurchaseOrder from '../models/PurchaseOrder'
 import Company from '../models/Company'
 import Product from '../models/Product'
-import User from '../models/User'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
 import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
 
 const updateCompanyRating = async (companyId: Types.ObjectId, newRating: number) => {
   const company = await Company.findById(companyId)
@@ -42,8 +35,7 @@ const updateProductRating = async (productId: Types.ObjectId, newRating: number)
 // POST /api/reviews
 export const submitReview = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { purchaseOrderId, reviewType, rating, comment } = req.body
     if (!purchaseOrderId || !reviewType || !rating) { sendError(res, 'purchaseOrderId, reviewType and rating are required', 400); return }
@@ -97,9 +89,16 @@ export const submitReview = async (req: AuthRequest, res: Response): Promise<voi
 
     sendSuccess(res, { review }, undefined, 201)
   } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
-      sendError(res, 'You have already submitted this review', 409); return
+    if (err instanceof CompanyRequiredError) {
+      sendError(res, err.message, err.statusCode)
+      return
     }
+
+    if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
+      sendError(res, 'You have already submitted this review', 409)
+      return
+    }
+
     sendError(res, 'Server error', 500)
   }
 }
@@ -126,7 +125,12 @@ export const listReviews = async (req: Request, res: Response): Promise<void> =>
       .limit(pageLimit)
 
     sendPaginated(res, reviews, reviews.length === pageLimit ? reviews[reviews.length - 1]._id.toString() : null)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) {
+      sendError(res, err.message, err.statusCode)
+      return
+    }
+
     sendError(res, 'Server error', 500)
   }
 }
