@@ -10,6 +10,7 @@ import AuditLog from '../models/AuditLog'
 import { uploadDocument, getSignedDocumentUrl } from '../services/b2'
 import { sendSuccess, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { getUserCompany, requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 export const upload = multer({
   storage: multer.memoryStorage(),
@@ -26,18 +27,10 @@ const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
 
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
-
 // POST /api/documents
 export const uploadDocumentHandler = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
     if (!req.file) { sendError(res, 'No file uploaded', 400); return }
 
     const { loanApplicationId, documentType } = req.body
@@ -62,6 +55,7 @@ export const uploadDocumentHandler = async (req: AuthRequest, res: Response): Pr
       document: { _id: doc._id, documentType: doc.documentType, originalFileName: doc.originalFileName, fileSize: doc.fileSize, mimeType: doc.mimeType, status: doc.status, createdAt: doc.createdAt },
     }, undefined, 201)
   } catch (err: unknown) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     const message = err instanceof Error ? err.message : 'Server error'
     sendError(res, message, 500)
   }
