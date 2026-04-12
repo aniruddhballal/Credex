@@ -22,6 +22,32 @@ export const tokenStorage = {
   clear: () => localStorage.removeItem('credex_access_token'),
 }
 
+// ── Typed response shapes ─────────────────────────────────────────────────────
+
+/** All backend success responses are wrapped: { success: true, data: T, message?: string } */
+export interface ApiResponse<T> {
+  success: boolean
+  data: T
+  message?: string
+}
+
+/** Paginated list responses: { success: true, data: { items: T[], nextCursor, total? } } */
+export interface PaginatedApiResponse<T> {
+  success: boolean
+  data: {
+    items: T[]
+    nextCursor: string | null
+    total?: number
+  }
+  message?: string
+}
+
+export interface ApiError {
+  success: false
+  error: string
+  code?: string
+}
+
 // ── Client ────────────────────────────────────────────────────────────────────
 
 const api: AxiosInstance = axios.create({
@@ -33,14 +59,17 @@ const api: AxiosInstance = axios.create({
 // Request: attach access token
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = tokenStorage.get()
+
+  console.log("TOKEN:", token)
+
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
   return config
 })
 
 // Routes where a 401 is expected and should NOT trigger a refresh attempt
-// (login failure, unverified email etc. are all valid 401/403 responses)
 const AUTH_ROUTES = ['/api/auth/login', '/api/auth/register', '/api/auth/refresh']
 
 const isAuthRoute = (url?: string): boolean =>
@@ -78,13 +107,13 @@ api.interceptors.response.use(
 
       isRefreshing = true
       try {
-        // FIX: backend returns { accessToken } directly, not { data: { accessToken } }
-        const res = await axios.post<{ accessToken: string }>(
+        // Backend returns { success: true, data: { accessToken } }
+        const res = await axios.post<ApiResponse<{ accessToken: string }>>(
           `${BASE_URL}/api/auth/refresh`,
           {},
           { withCredentials: true }
         )
-        const newToken = res.data.accessToken
+        const newToken = res.data.data.accessToken
         tokenStorage.set(newToken)
         refreshQueue.forEach((cb) => cb(newToken))
         refreshQueue = []
@@ -107,23 +136,3 @@ api.interceptors.response.use(
 )
 
 export default api
-
-// ── Typed response helper ─────────────────────────────────────────────────────
-
-export interface ApiResponse<T> {
-  success: boolean
-  data?: T
-  message?: string
-}
-
-export interface ApiError {
-  success: false
-  message: string
-  code?: string
-}
-
-/** Unwrap a direct backend response (our backend returns data at root, not nested) */
-export async function apiCall<T>(promise: Promise<{ data: T }>): Promise<T> {
-  const res = await promise
-  return res.data
-}
