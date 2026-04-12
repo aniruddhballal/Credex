@@ -1,30 +1,12 @@
-import { Request, Response, NextFunction } from 'express'
+import { Request, Response } from 'express'
 import { Types } from 'mongoose'
-import multer from 'multer'
-import DocumentModel from '../models/Document'
-import DocumentAccessLog from '../models/DocumentAccessLog'
-import LoanApplication from '../models/LoanApplication'
-import User from '../models/User'
+import CreditScore from '../models/CreditScore'
 import Company from '../models/Company'
-import AuditLog from '../models/AuditLog'
-import { uploadDocument, getSignedDocumentUrl } from '../services/b2'
-import { sendSuccess, sendError } from '../utils/response'
+import PurchaseOrder from '../models/PurchaseOrder'
+import Review from '../models/Review'
+import User from '../models/User'
 import { AuthRequest } from '../middleware/auth'
-
-export const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp',
-      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    if (allowed.includes(file.mimetype)) cb(null, true)
-    else cb(new Error('File type not allowed. Accepted: PDF, JPG, PNG, WEBP, DOC, DOCX'))
-  },
-})
-
-const getIp = (req: Request): string =>
-  ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
-  req.socket.remoteAddress || 'unknown'
+import { sendSuccess, sendError } from '../utils/response'
 
 const getUserCompany = async (userId: string) => {
   const user = await User.findById(userId)
@@ -33,159 +15,164 @@ const getUserCompany = async (userId: string) => {
   return { user, company }
 }
 
-// POST /api/documents
-export const uploadDocumentHandler = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
-    if (!req.file) { sendError(res, 'No file uploaded', 400); return }
+/**
+ * Simple in-process credit score computation (V1)
+ * Python ML service will replace this in V2
+ * Score range: 300–900
+ */
+const computeScore = async (companyId: Types.ObjectId) => {
+  // 1. Payment history — % of POs paid on time
+  const allPOs = await PurchaseOrder.find({ buyerId: companyId, isDeleted: false, paymentStatus: { $in: ['paid', 'overdue'] } })
+  const paidOnTime = allPOs.filter((po) => {
+    if (po.paymentStatus !== 'paid') return false
+    return po.updatedAt <= po.paymentDeadline
+  })
+  const paymentHistoryScore = allPOs.length > 0
+    ? (paidOnTime.length / allPOs.length) * 100
+    : 50 // neutral if no history
 
-    const { loanApplicationId, documentType } = req.body
-    if (!loanApplicationId || !documentType) { sendError(res, 'loanApplicationId and documentType are required', 400); return }
+  // 2. Outstanding debt — unpaid/overdue POs as % of total
+  const activePOs = await PurchaseOrder.find({ buyerId: companyId, isDeleted: false, paymentStatus: { $ne: 'paid' }, status: { $ne: 'cancelled' } })
+  const totalOutstanding = activePOs.reduce((sum, po) => sum + po.amountRemaining, 0)
+  // Penalise if outstanding > 10L paise (₹1,00,000)
+  const outstandingScore = Math.max(0, 100 - (totalOutstanding / 1000000) * 20)
 
-    const loan = await LoanApplication.findOne({ _id: loanApplicationId, companyId: company._id, isDeleted: false })
-    if (!loan) { sendError(res, 'Loan application not found or not yours', 404); return }
+  // 3. Trade activity — number of completed POs (capped at 20)
+  const completedPOs = await PurchaseOrder.countDocuments({ buyerId: companyId, status: 'completed', isDeleted: false })
+  const tradeActivityScore = Math.min(completedPOs * 5, 100)
 
-    const { b2Key, bucket } = await uploadDocument(req.file.buffer, company._id.toString(), loanApplicationId, req.file.originalname, req.file.mimetype)
+  // 4. Reviews — average rating from counterparties
+  const reviews = await Review.find({ targetCompanyId: companyId, isDeleted: false })
+  const reviewScore = reviews.length > 0
+    ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length) * 20
+    : 50
 
-    const doc = await DocumentModel.create({
-      uploadedBy: new Types.ObjectId(req.user!.userId), companyId: company._id,
-      loanApplicationId: new Types.ObjectId(loanApplicationId),
-      documentType, originalFileName: req.file.originalname,
-      fileSize: req.file.size, mimeType: req.file.mimetype,
-      s3Key: b2Key, s3Bucket: bucket, status: 'uploaded', isDeleted: false,
-    })
+  // 5. Credit utilisation — placeholder (no credit facility in V1)
+  const creditUtilization = 70 // neutral default
 
-    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'document.upload', entityType: 'Document', entityId: doc._id, note: `Uploaded '${doc.originalFileName}'`, timestamp: new Date() }).catch(() => {})
+  // Weighted composite → map to 300–900
+  const raw =
+    paymentHistoryScore * 0.35 +
+    outstandingScore * 0.25 +
+    tradeActivityScore * 0.20 +
+    reviewScore * 0.15 +
+    creditUtilization * 0.05
 
-    sendSuccess(res, {
-      document: { _id: doc._id, documentType: doc.documentType, originalFileName: doc.originalFileName, fileSize: doc.fileSize, mimeType: doc.mimeType, status: doc.status, createdAt: doc.createdAt },
-    }, undefined, 201)
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Server error'
-    sendError(res, message, 500)
+  const score = Math.round(300 + (raw / 100) * 600)
+
+  return {
+    score,
+    breakdown: {
+      paymentHistory: Math.round(paymentHistoryScore),
+      outstandingDebt: Math.round(outstandingScore),
+      tradeActivity: Math.round(tradeActivityScore),
+      reviews: Math.round(reviewScore),
+      creditUtilization: Math.round(creditUtilization),
+    },
   }
 }
 
-// GET /api/documents/:id/url — FIX 4: return both url and signedUrl fields
-export const getDocumentUrl = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/credit-scores/me
+export const getMyScore = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const doc = await DocumentModel.findOne({ _id: req.params.id, isDeleted: false })
-    if (!doc) { sendError(res, 'Document not found', 404); return }
-
-    const isUnderwriter = ['underwriter', 'system_admin'].includes(req.user!.role)
     const { company } = await getUserCompany(req.user!.userId)
-    const isOwner = company && doc.companyId.toString() === company._id.toString()
-
-    if (!isUnderwriter && !isOwner) { sendError(res, 'Access denied', 403); return }
-
-    const signedUrl = await getSignedDocumentUrl(doc.s3Key)
-
-    DocumentAccessLog.create({
-      documentId: doc._id, accessedBy: new Types.ObjectId(req.user!.userId),
-      accessedByRole: req.user!.role, ipAddress: getIp(req),
-      userAgent: req.headers['user-agent'], accessedAt: new Date(),
-    }).catch(() => {})
-
-    sendSuccess(res, {
-      url: signedUrl,         // FIX 4 — frontend expects this field name
-      signedUrl: signedUrl,   // keep for backward compat
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      expiresInSeconds: 900,
-    })
-  } catch {
-    sendError(res, 'Server error', 500)
-  }
-}
-
-// GET /api/documents
-export const listDocuments = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const { loanApplicationId } = req.query
-    if (!loanApplicationId) { sendError(res, 'loanApplicationId is required', 400); return }
-
-    const isUnderwriter = ['underwriter', 'system_admin'].includes(req.user!.role)
-    const { company } = await getUserCompany(req.user!.userId)
-
-    const filter: Record<string, unknown> = { loanApplicationId: new Types.ObjectId(loanApplicationId as string), isDeleted: false }
-    if (!isUnderwriter) {
-      if (!company) { sendError(res, 'No company linked to account', 403); return }
-      filter.companyId = company._id
+    if (!company) {
+      res.status(404).json({ success: false, message: 'No company linked to account' })
+      return
     }
 
-    const docs = await DocumentModel.find(filter).select('-s3Key -s3Bucket').sort({ createdAt: -1 })
-    sendSuccess(res, { documents: docs })
+    const latest = await CreditScore.findOne({ companyId: company._id }).sort({ computedAt: -1 })
+
+    res.json({ success: true, creditScore: latest ?? null })
   } catch {
-    sendError(res, 'Server error', 500)
+    res.status(500).json({ success: false, message: 'Server error' })
   }
 }
 
-// PATCH /api/documents/:id/accept
-export const acceptDocument = async (req: AuthRequest, res: Response): Promise<void> => {
+// GET /api/credit-scores/me/history
+export const getMyScoreHistory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can review documents', 403); return }
-    const doc = await DocumentModel.findOne({ _id: req.params.id, isDeleted: false })
-    if (!doc) { sendError(res, 'Document not found', 404); return }
-
-    const before = doc.status
-    doc.status = 'accepted'
-    doc.reviewedBy = new Types.ObjectId(req.user!.userId)
-    doc.reviewedAt = new Date()
-    await doc.save()
-
-    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'document.accept', entityType: 'Document', entityId: doc._id, changes: { status: { before, after: 'accepted' } }, timestamp: new Date() }).catch(() => {})
-
-    sendSuccess(res, { document: { _id: doc._id, status: doc.status } })
-  } catch {
-    sendError(res, 'Server error', 500)
-  }
-}
-
-// PATCH /api/documents/:id/reject
-export const rejectDocument = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    if (!['underwriter', 'system_admin'].includes(req.user!.role)) { sendError(res, 'Only underwriters can review documents', 403); return }
-    const { reason } = req.body
-    if (!reason) { sendError(res, 'Rejection reason is required', 400); return }
-
-    const doc = await DocumentModel.findOne({ _id: req.params.id, isDeleted: false })
-    if (!doc) { sendError(res, 'Document not found', 404); return }
-
-    const before = doc.status
-    doc.status = 'rejected'
-    doc.rejectionReason = reason
-    doc.reviewedBy = new Types.ObjectId(req.user!.userId)
-    doc.reviewedAt = new Date()
-    await doc.save()
-
-    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'document.reject', entityType: 'Document', entityId: doc._id, changes: { status: { before, after: 'rejected' } }, note: reason, timestamp: new Date() }).catch(() => {})
-
-    sendSuccess(res, { document: { _id: doc._id, status: doc.status, rejectionReason: doc.rejectionReason } })
-  } catch {
-    sendError(res, 'Server error', 500)
-  }
-}
-
-// DELETE /api/documents/:id
-export const deleteDocumentHandler = async (req: AuthRequest, res: Response): Promise<void> => {
-  try {
-    const doc = await DocumentModel.findOne({ _id: req.params.id, isDeleted: false })
-    if (!doc) { sendError(res, 'Document not found', 404); return }
-
     const { company } = await getUserCompany(req.user!.userId)
-    const isOwner = company && doc.companyId.toString() === company._id.toString()
-    const isAdmin = req.user!.role === 'system_admin'
-    if (!isOwner && !isAdmin) { sendError(res, 'You cannot delete this document', 403); return }
+    if (!company) {
+      res.status(404).json({ success: false, message: 'No company linked to account' })
+      return
+    }
 
-    doc.isDeleted = true
-    doc.deletedAt = new Date()
-    doc.deletedBy = new Types.ObjectId(req.user!.userId)
-    await doc.save()
+    const history = await CreditScore.find({ companyId: company._id })
+      .sort({ computedAt: -1 })
+      .limit(30) // last 30 data points
 
-    AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'document.delete', entityType: 'Document', entityId: doc._id, note: `Soft-deleted '${doc.originalFileName}'`, timestamp: new Date() }).catch(() => {})
-
-    sendSuccess(res, null, 'Document deleted')
+    res.json({ success: true, history })
   } catch {
-    sendError(res, 'Server error', 500)
+    res.status(500).json({ success: false, message: 'Server error' })
+  }
+}
+
+// GET /api/credit-scores/company/:companyId  (underwriter/admin only)
+export const getScoreByCompany = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const latest = await CreditScore.findOne({ companyId: req.params.companyId }).sort({ computedAt: -1 })
+    res.json({ success: true, creditScore: latest ?? null })
+  } catch {
+    res.status(500).json({ success: false, message: 'Server error' })
+  }
+}
+
+// POST /api/credit-scores/me/compute
+// Trigger a fresh compute for own company
+export const computeMyScore = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const { company } = await getUserCompany(req.user!.userId)
+    if (!company) {
+      res.status(404).json({ success: false, message: 'No company linked to account' })
+      return
+    }
+
+    const { score, breakdown } = await computeScore(company._id as Types.ObjectId)
+
+    const creditScore = await CreditScore.create({
+      companyId: company._id,
+      score,
+      breakdown,
+      computedAt: new Date(),
+      computedBy: 'system',
+    })
+
+    // Update company.creditScoreRef to latest
+    company.creditScoreRef = creditScore._id as Types.ObjectId
+    await company.save()
+
+    res.json({ success: true, creditScore })
+  } catch {
+    res.status(500).json({ success: false, message: 'Server error' })
+  }
+}
+
+// POST /api/credit-scores/company/:companyId/compute  (admin only)
+export const computeScoreForCompany = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const company = await Company.findOne({ _id: req.params.companyId, isDeleted: false })
+    if (!company) {
+      res.status(404).json({ success: false, message: 'Company not found' })
+      return
+    }
+
+    const { score, breakdown } = await computeScore(company._id as Types.ObjectId)
+
+    const creditScore = await CreditScore.create({
+      companyId: company._id,
+      score,
+      breakdown,
+      computedAt: new Date(),
+      computedBy: 'manual',
+      note: `Manually triggered by admin ${req.user!.userId}`,
+    })
+
+    company.creditScoreRef = creditScore._id as Types.ObjectId
+    await company.save()
+
+    res.json({ success: true, creditScore })
+  } catch {
+    res.status(500).json({ success: false, message: 'Server error' })
   }
 }
