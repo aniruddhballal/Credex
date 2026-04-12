@@ -195,7 +195,7 @@ export default function ProfilePage() {
                     const fd = new FormData()
                     fd.append('image', f)
                     try {
-                      await api.patch('/api/users/profile', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
+                      await api.patch('/api/images/profile', fd, { headers: { 'Content-Type': 'multipart/form-data' } })
                       toast.success('Profile photo updated.')
                       refreshUser()
                     } catch { toast.error('Upload failed') }
