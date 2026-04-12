@@ -64,16 +64,20 @@ export function formatRelative(date: string | Date): string {
 }
 
 /** Deadline-aware label. e.g. "Today", "Tomorrow", "3 days left", "2 days overdue" */
-export function formatDeadline(deadline: string | Date): { label: string; urgency: 'overdue' | 'high' | 'medium' | 'low' } {
+// Thresholds: ≤0 overdue, 1–3 high, 4–7 medium, >7 low
+export function formatDeadline(deadline: string | Date): {
+  label: string;
+  urgency: 'overdue' | 'high' | 'medium' | 'low'
+} {
   const d = new Date(deadline)
-  if (isPast(d) && !isToday(d)) {
-    const days = Math.floor((Date.now() - d.getTime()) / 86_400_000)
-    return { label: `${days}d overdue`, urgency: 'overdue' }
-  }
-  if (isToday(d)) return { label: 'Due today', urgency: 'high' }
-  if (isTomorrow(d)) return { label: 'Due tomorrow', urgency: 'high' }
-  const daysLeft = Math.ceil((d.getTime() - Date.now()) / 86_400_000)
-  if (daysLeft <= 7) return { label: `${daysLeft}d left`, urgency: 'medium' }
+  const now = new Date()
+  const daysLeft = Math.ceil((d.getTime() - now.getTime()) / 86_400_000)
+
+  if (daysLeft < 0)  return { label: `${Math.abs(daysLeft)}d overdue`, urgency: 'overdue' }
+  if (daysLeft === 0) return { label: 'Due today', urgency: 'high' }
+  if (daysLeft === 1) return { label: 'Due tomorrow', urgency: 'high' }
+  if (daysLeft <= 3)  return { label: `${daysLeft}d left`, urgency: 'high' }
+  if (daysLeft <= 7)  return { label: `${daysLeft}d left`, urgency: 'medium' }
   return { label: formatDate(d), urgency: 'low' }
 }
 
