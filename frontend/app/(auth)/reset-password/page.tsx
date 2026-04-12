@@ -31,8 +31,8 @@ export default function ResetPasswordPage() {
   const searchParams = useSearchParams()
   const token        = searchParams.get('token')
 
-  const [loading, setLoading]   = useState(false)
-  const [success, setSuccess]   = useState(false)
+  const [loading, setLoading]           = useState(false)
+  const [success, setSuccess]           = useState(false)
   const [tokenInvalid, setTokenInvalid] = useState(!token)
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
@@ -43,9 +43,10 @@ export default function ResetPasswordPage() {
     if (!token) return
     setLoading(true)
     try {
+      // FIX 1: field name changed from `newPassword` → `password` to match backend
       await api.post('/api/auth/reset-password', {
         token,
-        newPassword: data.password,
+        password: data.password,
       })
       setSuccess(true)
       setTimeout(() => router.push('/login'), 2500)
@@ -61,48 +62,39 @@ export default function ResetPasswordPage() {
     }
   }
 
-  // Token missing or invalid
   if (tokenInvalid) {
     return (
       <div className="text-center">
-        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mx-auto">
+        <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto">
           <AlertCircle className="w-6 h-6 text-red-400" />
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-gray-900">Link invalid or expired</h1>
-        <p className="mt-2 text-sm text-gray-500">
+        <h1 className="mt-4 text-xl font-semibold text-white">Link invalid or expired</h1>
+        <p className="mt-2 text-sm text-white/45">
           Password reset links expire after 30 minutes. Request a new one.
         </p>
-        <Link
-          href="/forgot-password"
-          className="mt-6 inline-block text-sm font-medium text-indigo-600 hover:underline"
-        >
+        <Link href="/forgot-password" className="mt-6 inline-block text-sm font-medium text-indigo-400 hover:text-indigo-300">
           Request new link →
         </Link>
       </div>
     )
   }
 
-  // Success
   if (success) {
     return (
       <div className="text-center">
-        <div className="w-12 h-12 rounded-full bg-emerald-50 flex items-center justify-center mx-auto">
-          <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+        <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto">
+          <CheckCircle2 className="w-6 h-6 text-emerald-400" />
         </div>
-        <h1 className="mt-4 text-xl font-semibold text-gray-900">Password reset!</h1>
-        <p className="mt-2 text-sm text-gray-500">
-          Your password has been updated. Redirecting you to sign in…
-        </p>
+        <h1 className="mt-4 text-xl font-semibold text-white">Password reset!</h1>
+        <p className="mt-2 text-sm text-white/45">Redirecting you to sign in…</p>
       </div>
     )
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-gray-900">Set a new password</h1>
-      <p className="text-sm text-gray-500 mt-1">
-        Choose a strong password for your Credex account.
-      </p>
+      <h1 className="text-2xl font-semibold text-white">Set a new password</h1>
+      <p className="text-sm text-white/45 mt-1">Choose a strong password for your Credex account.</p>
 
       <form onSubmit={handleSubmit(onSubmit)} className="mt-8 space-y-4">
         <Input
@@ -130,11 +122,9 @@ export default function ResetPasswordPage() {
         </Button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray-500">
+      <p className="mt-6 text-center text-sm text-white/40">
         Remembered it?{' '}
-        <Link href="/login" className="text-indigo-600 font-medium hover:underline">
-          Sign in
-        </Link>
+        <Link href="/login" className="text-indigo-400 font-medium hover:text-indigo-300">Sign in</Link>
       </p>
     </div>
   )
