@@ -16,7 +16,7 @@ import { SkeletonCard } from '@/components/ui/Skeleton'
 import { ConfirmModal } from '@/components/ui/Modal'
 import { ErrorState } from '@/components/ui/Pagination'
 import { useFetch, useDisclosure } from '@/hooks'
-import { rfqApi } from '@/lib/api-hooks'
+import { rfqApi, createPO } from '@/lib/api-hooks'
 import { useAuth } from '@/lib/auth-context'
 import { formatCurrency, formatDateTime, humanize } from '@/lib/format'
 import type { RFQ, NegotiationEntry } from '@/types'
@@ -82,11 +82,19 @@ export default function SupplierRFQDetailPage() {
     setSubmitting(true)
     try {
       await rfqApi.accept(id)
+
+      // create PO and redirect to it
+      const poRes = await createPO(id)
+      const newPOId = (poRes.data as any).data._id
+
       toast.success('RFQ accepted — Purchase Order created!')
-      router.push('/supplier/purchase-orders')
+      router.push(`/buyer/purchase-orders/${newPOId}`)
     } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed')
-    } finally { setSubmitting(false); acceptModal.close() }
+      toast.error(err?.response?.data?.error ?? 'Failed to accept')
+    } finally {
+      setSubmitting(false)
+      acceptModal.close()
+    }
   }
 
   const handleDecline = async () => {
