@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import api, { tokenStorage } from '@/lib/api'
+import api, { tokenStorage, ApiResponse } from '@/lib/api'
 import type { AuthUser } from '@/types'
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -54,9 +54,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      // Backend returns { success, user } — not { data: { user } }
-      const res = await api.get<{ user: AuthUser }>('/api/auth/me')
-      dispatch({ type: 'SET_USER', payload: res.data.user })
+      // Backend returns { success: true, data: { user } }
+      const res = await api.get<ApiResponse<{ user: AuthUser }>>('/api/auth/me')
+      dispatch({ type: 'SET_USER', payload: res.data.data.user })
     } catch {
       dispatch({ type: 'CLEAR_USER' })
       tokenStorage.clear()
@@ -75,12 +75,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refreshUser])
 
   const login = useCallback(async (email: string, password: string) => {
-    // Backend returns { success, accessToken, user } — not { data: { accessToken, user } }
-    const res = await api.post<{ accessToken: string; user: AuthUser }>(
+    // Backend returns { success: true, data: { accessToken, user } }
+    const res = await api.post<ApiResponse<{ accessToken: string; user: AuthUser }>>(
       '/api/auth/login',
       { email, password }
     )
-    const { accessToken, user } = res.data
+    const { accessToken, user } = res.data.data
     tokenStorage.set(accessToken)
 
     // Set lightweight cookies for middleware route protection
