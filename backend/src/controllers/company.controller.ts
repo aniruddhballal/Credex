@@ -3,6 +3,7 @@ import { Types } from 'mongoose'
 import Company from '../models/Company'
 import User from '../models/User'
 import AuditLog from '../models/AuditLog'
+import { generateAccessToken } from '../utils/jwt'
 import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
 
@@ -55,13 +56,21 @@ export const createCompany = async (req: AuthRequest, res: Response): Promise<vo
     user.companyId = company._id as Types.ObjectId
     await user.save()
 
+    // Issue a fresh access token so the client's JWT reflects the new companyId
+    // immediately — without requiring a logout/login cycle.
+    const accessToken = generateAccessToken({
+      userId: user._id.toString(),
+      role: user.role,
+      companyId: (company._id as Types.ObjectId).toString(),
+    })
+
     AuditLog.create({
       performedBy: new Types.ObjectId(userId), performedByRole: userRole, ipAddress: getIp(req),
       action: 'company.create', entityType: 'Company', entityId: company._id,
       note: `Company '${company.name}' created`, timestamp: new Date(),
     }).catch(() => {})
 
-    sendSuccess(res, { company }, undefined, 201)
+    sendSuccess(res, { company, accessToken }, undefined, 201)
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'code' in err && (err as { code: number }).code === 11000) {
       sendError(res, 'A company with this GSTIN or PAN already exists', 409); return
@@ -71,15 +80,21 @@ export const createCompany = async (req: AuthRequest, res: Response): Promise<vo
 }
 
 // GET /api/companies/me/profile
+// Returns 200 with { company: null, setupRequired: true } when no company exists,
+// rather than 404, so the frontend has a uniform signal for onboarding state.
 export const getMyCompany = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const user = await User.findById(req.user!.userId)
-    if (!user?.companyId) { sendError(res, 'No company linked to your account', 404); return }
+    if (!user?.companyId) {
+      sendSuccess(res, { company: null, setupRequired: true }); return
+    }
 
     const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-    if (!company) { sendError(res, 'Company not found', 404); return }
+    if (!company) {
+      sendSuccess(res, { company: null, setupRequired: true }); return
+    }
 
-    sendSuccess(res, { company })
+    sendSuccess(res, { company, setupRequired: false })
   } catch {
     sendError(res, 'Server error', 500)
   }
