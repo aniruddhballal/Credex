@@ -4,16 +4,8 @@ import CreditScore from '../models/CreditScore'
 import Company from '../models/Company'
 import PurchaseOrder from '../models/PurchaseOrder'
 import Review from '../models/Review'
-import User from '../models/User'
 import { AuthRequest } from '../middleware/auth'
-import { sendSuccess, sendError } from '../utils/response'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 /**
  * Simple in-process credit score computation (V1)
@@ -75,16 +67,11 @@ const computeScore = async (companyId: Types.ObjectId) => {
 // GET /api/credit-scores/me
 export const getMyScore = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(404).json({ success: false, message: 'No company linked to account' })
-      return
-    }
-
+    const company = await requireUserCompany(req.user!.userId)
     const latest = await CreditScore.findOne({ companyId: company._id }).sort({ computedAt: -1 })
-
     res.json({ success: true, creditScore: latest ?? null })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { res.status(err.statusCode).json({ success: false, message: err.message }); return }
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
@@ -92,18 +79,13 @@ export const getMyScore = async (req: AuthRequest, res: Response): Promise<void>
 // GET /api/credit-scores/me/history
 export const getMyScoreHistory = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(404).json({ success: false, message: 'No company linked to account' })
-      return
-    }
-
+    const company = await requireUserCompany(req.user!.userId)
     const history = await CreditScore.find({ companyId: company._id })
       .sort({ computedAt: -1 })
-      .limit(30) // last 30 data points
-
+      .limit(30)
     res.json({ success: true, history })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { res.status(err.statusCode).json({ success: false, message: err.message }); return }
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
@@ -122,28 +104,19 @@ export const getScoreByCompany = async (req: Request, res: Response): Promise<vo
 // Trigger a fresh compute for own company
 export const computeMyScore = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(404).json({ success: false, message: 'No company linked to account' })
-      return
-    }
-
+    const company = await requireUserCompany(req.user!.userId)
     const { score, breakdown } = await computeScore(company._id as Types.ObjectId)
-
     const creditScore = await CreditScore.create({
       companyId: company._id,
-      score,
-      breakdown,
+      score, breakdown,
       computedAt: new Date(),
       computedBy: 'system',
     })
-
-    // Update company.creditScoreRef to latest
     company.creditScoreRef = creditScore._id as Types.ObjectId
     await company.save()
-
     res.json({ success: true, creditScore })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { res.status(err.statusCode).json({ success: false, message: err.message }); return }
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
