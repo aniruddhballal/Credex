@@ -82,8 +82,10 @@ export default function SupplierRFQDetailPage() {
     setSubmitting(true)
     try {
       await rfqApi.accept(id)
-      toast.success('RFQ accepted — Purchase Order created!')
-      router.push('/supplier/purchase-orders')
+      // FIX 10: Supplier accepts the RFQ terms only — the BUYER creates the PO.
+      // Redirect back to the RFQ list, not purchase orders.
+      toast.success('Terms accepted — buyer will be notified to confirm the order.')
+      router.push('/supplier/rfqs')
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed')
     } finally { setSubmitting(false); acceptModal.close() }
@@ -229,7 +231,7 @@ export default function SupplierRFQDetailPage() {
 
       <ConfirmModal open={acceptModal.isOpen} onClose={acceptModal.close} onConfirm={handleAccept}
         loading={submitting} title="Accept these terms?"
-        message={`Creates a PO for ${formatCurrency(rfq.currentProposedPrice * rfq.currentProposedQuantity)}.`}
+        message={`You're accepting the buyer's terms. The buyer will be notified to confirm and create the Purchase Order.`}
         confirmLabel="Accept" />
       <ConfirmModal open={declineModal.isOpen} onClose={declineModal.close} onConfirm={handleDecline}
         loading={submitting} title="Decline this RFQ?"
