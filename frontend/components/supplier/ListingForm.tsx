@@ -11,7 +11,7 @@ import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea, Select } from '@/components/ui/Input'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
-import { productsApi } from '@/lib/api-hooks'
+import api from '@/lib/api'
 import type { Product } from '@/types'
 
 const CATEGORIES = [
@@ -44,23 +44,23 @@ const schema = z.object({
   stockQuantity:              z.coerce.number().int().min(0).optional(),
   defaultPaymentDeadlineDays: z.coerce.number().int().min(1).max(365),
   defaultPenaltyRate:         z.coerce.number().min(0).max(5),
-  tags:                       z.string().optional(),   // comma-separated, parsed on submit
+  tags:                       z.string().optional(),
 })
 type FormData = z.infer<typeof schema>
 
 interface ListingFormProps {
-  product?: Product    // undefined = create mode
+  product?: Product
 }
 
 export default function ListingForm({ product }: ListingFormProps) {
   const router = useRouter()
-  const [submitting, setSubmitting]     = useState(false)
+  const [submitting, setSubmitting]               = useState(false)
   const [selectedFinancing, setSelectedFinancing] = useState<string[]>(
     product?.acceptedFinancingMethods ?? []
   )
-  const [images, setImages]   = useState<File[]>([])
-  const [previews, setPreviews] = useState<string[]>(product?.images ?? [])
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [newImages, setNewImages]   = useState<File[]>([])
+  const [previews, setPreviews]     = useState<string[]>(product?.images ?? [])
+  const fileInputRef                = useRef<HTMLInputElement>(null)
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -90,11 +90,12 @@ export default function ListingForm({ product }: ListingFormProps) {
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? [])
-    if (files.length + images.length + (product?.images.length ?? 0) > 5) {
+    const existingCount = previews.length
+    if (files.length + existingCount > 5) {
       toast.error('Maximum 5 images per listing')
       return
     }
-    setImages((prev) => [...prev, ...files])
+    setNewImages((prev) => [...prev, ...files])
     files.forEach((f) => {
       const reader = new FileReader()
       reader.onload = (ev) => setPreviews((prev) => [...prev, ev.target?.result as string])
@@ -103,10 +104,12 @@ export default function ListingForm({ product }: ListingFormProps) {
   }
 
   const removePreview = (i: number) => {
-    setPreviews((prev) => prev.filter((_, idx) => idx !== i))
-    if (i >= (product?.images.length ?? 0)) {
-      setImages((prev) => prev.filter((_, idx) => idx !== i - (product?.images.length ?? 0)))
+    const isExisting = product && i < product.images.length
+    if (!isExisting) {
+      const newIdx = i - (product?.images.length ?? 0)
+      setNewImages((prev) => prev.filter((_, idx) => idx !== newIdx))
     }
+    setPreviews((prev) => prev.filter((_, idx) => idx !== i))
   }
 
   const onSubmit = async (data: FormData) => {
@@ -114,30 +117,46 @@ export default function ListingForm({ product }: ListingFormProps) {
       toast.error('Select at least one financing method')
       return
     }
-
     setSubmitting(true)
     try {
-      const formData = new FormData()
-      formData.append('name', data.name)
-      if (data.description) formData.append('description', data.description)
-      formData.append('category', data.category)
-      formData.append('basePrice', String(Math.round(data.basePrice * 100)))
-      formData.append('priceUnit', data.priceUnit)
-      formData.append('isNegotiable', String(data.isNegotiable))
-      if (data.stockQuantity !== undefined) formData.append('stockQuantity', String(data.stockQuantity))
-      formData.append('defaultPaymentDeadlineDays', String(data.defaultPaymentDeadlineDays))
-      formData.append('defaultPenaltyRate', String(data.defaultPenaltyRate))
-      formData.append('acceptedFinancingMethods', JSON.stringify(selectedFinancing))
-      if (data.tags) {
-        const tags = data.tags.split(',').map((t) => t.trim()).filter(Boolean)
-        formData.append('tags', JSON.stringify(tags))
+      const tags = data.tags
+        ? data.tags.split(',').map((t) => t.trim()).filter(Boolean)
+        : []
+
+      // FIX 2: Send JSON body first, then upload images separately
+      // Step 1: Create or update product with JSON body (no images in this request)
+      const jsonBody = {
+        name:                       data.name,
+        description:                data.description,
+        category:                   data.category,
+        basePrice:                  Math.round(data.basePrice * 100),
+        priceUnit:                  data.priceUnit,
+        isNegotiable:               data.isNegotiable,
+        isAvailable:                true,
+        stockQuantity:              data.stockQuantity,
+        defaultPaymentDeadlineDays: data.defaultPaymentDeadlineDays,
+        defaultPenaltyRate:         data.defaultPenaltyRate,
+        acceptedFinancingMethods:   selectedFinancing,
+        tags,
       }
-      images.forEach((img) => formData.append('images', img))
+
+      let productId: string
 
       if (product) {
-        await productsApi.update(product._id, data as any)
+        await api.patch(`/api/products/${product._id}`, jsonBody)
+        productId = product._id
       } else {
-        await productsApi.create(formData)
+        const res = await api.post<{ data: { _id: string } }>('/api/products', jsonBody)
+        productId = res.data.data._id
+      }
+
+      // Step 2: Upload each new image separately via /api/images/product/:productId
+      for (const imageFile of newImages) {
+        const formData = new FormData()
+        formData.append('image', imageFile)
+        await api.post(`/api/images/product/${productId}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
       }
 
       toast.success(product ? 'Listing updated.' : 'Listing created!')
@@ -166,17 +185,16 @@ export default function ListingForm({ product }: ListingFormProps) {
               error={errors.priceUnit?.message} required {...register('priceUnit')} />
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Input label="Base price (₹)" type="number" step="0.01"
-              placeholder="e.g. 5000" hint="In rupees"
-              error={errors.basePrice?.message} required {...register('basePrice')} />
-            <Input label="Stock quantity" type="number"
-              placeholder="Leave blank for unlimited / services"
+            <Input label="Base price (₹)" type="number" step="0.01" placeholder="e.g. 5000"
+              hint="In rupees" error={errors.basePrice?.message} required {...register('basePrice')} />
+            <Input label="Stock quantity" type="number" placeholder="Leave blank for unlimited / services"
               hint="Optional" {...register('stockQuantity')} />
           </div>
           <div className="flex items-center gap-2">
-            <input type="checkbox" id="isNegotiable" className="w-4 h-4 rounded border-gray-300 text-indigo-600"
+            <input type="checkbox" id="isNegotiable"
+              className="w-4 h-4 rounded border-white/20 bg-white/6 text-indigo-600"
               {...register('isNegotiable')} />
-            <label htmlFor="isNegotiable" className="text-sm text-gray-700">Price is negotiable</label>
+            <label htmlFor="isNegotiable" className="text-sm text-white/70">Price is negotiable</label>
           </div>
           <Input label="Tags" placeholder="steel, hot-rolled, HR, sheets (comma-separated)"
             hint="Helps buyers find your listing" {...register('tags')} />
@@ -197,22 +215,18 @@ export default function ListingForm({ product }: ListingFormProps) {
               error={errors.defaultPenaltyRate?.message}
               {...register('defaultPenaltyRate')} />
           </div>
-
           <div>
-            <p className="text-sm font-medium text-gray-700 mb-2">
-              Accepted financing methods <span className="text-red-500">*</span>
+            <p className="text-xs font-medium text-white/60 uppercase tracking-wide mb-2">
+              Accepted financing methods <span className="text-red-400">*</span>
             </p>
             <div className="flex flex-wrap gap-2">
               {FINANCING.map((f) => (
-                <button
-                  key={f.value} type="button"
-                  onClick={() => toggleFinancing(f.value)}
+                <button key={f.value} type="button" onClick={() => toggleFinancing(f.value)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                     selectedFinancing.includes(f.value)
                       ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
-                  }`}
-                >
+                      : 'bg-white/6 text-white/60 border-white/10 hover:border-white/25'
+                  }`}>
                   {f.label}
                 </button>
               ))}
@@ -225,49 +239,31 @@ export default function ListingForm({ product }: ListingFormProps) {
       <Card>
         <CardHeader>
           <CardTitle>Product images</CardTitle>
-          <span className="text-xs text-gray-400">{previews.length}/5</span>
+          <span className="text-xs text-white/35">{previews.length}/5</span>
         </CardHeader>
-
         <div className="flex flex-wrap gap-3">
           {previews.map((src, i) => (
-            <div key={i} className="relative w-24 h-24 rounded-lg overflow-hidden border border-gray-200 group">
+            <div key={i} className="relative w-24 h-24 rounded-xl overflow-hidden border border-white/10 group">
               <Image src={src} alt="" fill className="object-cover" sizes="96px" />
-              <button
-                type="button"
-                onClick={() => removePreview(i)}
-                className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
-              >
+              <button type="button" onClick={() => removePreview(i)}
+                className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                 <X className="w-5 h-5 text-white" />
               </button>
             </div>
           ))}
-
           {previews.length < 5 && (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-24 h-24 rounded-lg border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-1.5 text-gray-400 hover:border-indigo-300 hover:text-indigo-500 transition-colors"
-            >
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="w-24 h-24 rounded-xl border-2 border-dashed border-white/15 flex flex-col items-center justify-center gap-1.5 text-white/30 hover:border-indigo-500/50 hover:text-indigo-400 transition-colors">
               <Upload className="w-5 h-5" />
-              <span className="text-2xs">Upload</span>
+              <span className="text-xs">Upload</span>
             </button>
           )}
         </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={handleImageSelect}
-        />
-        <p className="text-xs text-gray-400 mt-3">
-          Up to 5 images. JPG, PNG, WebP. Hosted on Cloudinary.
-        </p>
+        <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
+          onChange={handleImageSelect} />
+        <p className="text-xs text-white/30 mt-3">Up to 5 images. JPG, PNG, WebP. Hosted on Cloudinary.</p>
       </Card>
 
-      {/* Submit */}
       <div className="flex gap-3 justify-end">
         <Button variant="secondary" type="button" onClick={() => router.back()}>Cancel</Button>
         <Button type="submit" loading={submitting}>
