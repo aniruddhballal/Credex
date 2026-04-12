@@ -52,10 +52,17 @@ export function middleware(request: NextRequest) {
   }
 
   // Role-based route protection
+  // system_admin → redirect to separate admin app
+  if (role === 'system_admin') {
+    const adminUrl = process.env.NEXT_PUBLIC_ADMIN_URL ?? 'http://localhost:3001'
+    return NextResponse.redirect(new URL(adminUrl))
+  }
+
+  // Role-based route protection
   for (const [r, prefix] of Object.entries(ROLE_ROUTES)) {
     if (pathname.startsWith(prefix) && role !== r) {
-      // Wrong role — redirect to their own area
-      return NextResponse.redirect(new URL(`${ROLE_ROUTES[role]}/dashboard`, request.url))
+      const dest = ROLE_ROUTES[role]
+      if (dest) return NextResponse.redirect(new URL(`${dest}/dashboard`, request.url))
     }
   }
 
