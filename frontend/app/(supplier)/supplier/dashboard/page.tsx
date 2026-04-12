@@ -13,6 +13,8 @@ import { useFetch } from '@/hooks'
 import { useAuth } from '@/lib/auth-context'
 import { formatCurrency, formatDeadline } from '@/lib/format'
 import type { RFQ, PurchaseOrder } from '@/types'
+import api from '@/lib/api'
+import { useEffect, useState } from 'react'
 
 interface SupplierDashboardData {
   activeListings:  number
@@ -23,9 +25,42 @@ interface SupplierDashboardData {
   activePOs:       PurchaseOrder[]
 }
 
+function useSupplierDashboard() {
+  const primary = useFetch<SupplierDashboardData>('/api/supplier/dashboard')
+  const [fallbackData, setFallbackData] = useState<SupplierDashboardData | null>(null)
+  const [fallbackLoading, setFallbackLoading] = useState(false)
+
+  useEffect(() => {
+    if (!primary.error) return
+    setFallbackLoading(true)
+    Promise.all([
+      api.get('/api/rfqs?role=supplier&status=pending&limit=5'),
+      api.get('/api/purchase-orders?role=supplier&paymentStatus=unpaid,partially_paid&limit=5'),
+      api.get('/api/products/my/listings'),
+    ]).then(([rfqRes, poRes, listingsRes]) => {
+      const rfqs: RFQ[]            = rfqRes.data?.data?.items ?? []
+      const pos: PurchaseOrder[]   = poRes.data?.data?.items ?? []
+      const listings               = listingsRes.data?.data?.items ?? []
+      const totalReceivable        = pos.reduce((sum, po) => sum + po.amountRemaining, 0)
+      setFallbackData({
+        activeListings:  listings.length,
+        pendingRFQs:     rfqs.length,
+        totalReceivable,
+        averageRating:   0,
+        incomingRFQs:    rfqs,
+        activePOs:       pos,
+      })
+    }).catch(console.error)
+      .finally(() => setFallbackLoading(false))
+  }, [primary.error])
+
+  if (!primary.error) return { data: primary.data, loading: primary.loading, isFallback: false }
+  return { data: fallbackData, loading: fallbackLoading, isFallback: true }
+}
+
 export default function SupplierDashboard() {
   const { user } = useAuth()
-  const { data, loading } = useFetch<SupplierDashboardData>('/api/supplier/dashboard')
+  const { data, loading, isFallback } = useSupplierDashboard()
 
   return (
     <div>
@@ -34,61 +69,59 @@ export default function SupplierDashboard() {
         subtitle="Here's your supplier overview."
         actions={
           <Link href="/supplier/listings/new">
-            <Button size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />}>
-              New listing
-            </Button>
+            <Button size="sm" iconLeft={<Plus className="w-3.5 h-3.5" />}>New listing</Button>
           </Link>
         }
       />
 
+      {isFallback && (
+        <div className="mb-4 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+          ⚠ Dashboard loading in degraded mode — waiting for <code>/api/supplier/dashboard</code> to go live
+        </div>
+      )}
+
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-        {loading ? (
-          Array.from({ length: 4 }).map((_, i) => <SkeletonMetricCard key={i} />)
-        ) : (
+        {loading ? Array.from({ length: 4 }).map((_, i) => <SkeletonMetricCard key={i} />) : (
           <>
             <StatCard label="Active Listings" value={data?.activeListings ?? 0}
-              icon={<Package className="w-4 h-4" />} iconColor="bg-indigo-50 text-indigo-600" />
+              icon={<Package className="w-4 h-4" />} iconColor="bg-indigo-500/15 text-indigo-400" />
             <StatCard label="Pending RFQs" value={data?.pendingRFQs ?? 0}
               sub="awaiting your response"
-              icon={<FileText className="w-4 h-4" />} iconColor="bg-amber-50 text-amber-600" />
+              icon={<FileText className="w-4 h-4" />} iconColor="bg-amber-500/15 text-amber-400" />
             <StatCard label="Total Receivable" value={formatCurrency(data?.totalReceivable ?? 0)}
               sub="across active POs"
-              icon={<ShoppingBag className="w-4 h-4" />} iconColor="bg-emerald-50 text-emerald-600" />
+              icon={<ShoppingBag className="w-4 h-4" />} iconColor="bg-emerald-500/15 text-emerald-400" />
             <StatCard label="Average Rating" value={data?.averageRating?.toFixed(1) ?? '—'}
               sub="across all reviews"
-              icon={<Star className="w-4 h-4" />} iconColor="bg-yellow-50 text-yellow-600" />
+              icon={<Star className="w-4 h-4" />} iconColor="bg-yellow-500/15 text-yellow-400" />
           </>
         )}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Incoming RFQs */}
         <Card padding="none">
           <CardHeader className="px-5 pt-5 pb-0">
             <CardTitle>Incoming RFQs</CardTitle>
-            <Link href="/supplier/rfqs" className="text-xs text-indigo-600 hover:underline">View all</Link>
+            <Link href="/supplier/rfqs" className="text-xs text-indigo-400 hover:text-indigo-300">View all</Link>
           </CardHeader>
           {loading ? <div className="mt-4"><SkeletonTable rows={3} /></div> :
            !data?.incomingRFQs.length ? (
             <EmptyState icon={<FileText className="w-5 h-5" />} title="No pending RFQs" />
            ) : (
-            <div className="mt-3 divide-y divide-gray-50">
+            <div className="mt-3 divide-y divide-white/5">
               {data.incomingRFQs.slice(0, 5).map((rfq) => {
-                const buyer = typeof rfq.buyerId === 'object' ? rfq.buyerId : null
+                const buyer   = typeof rfq.buyerId   === 'object' ? rfq.buyerId   : null
                 const product = typeof rfq.productId === 'object' ? rfq.productId : null
                 return (
                   <Link key={rfq._id} href={`/supplier/rfqs/${rfq._id}`}
-                    className="flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors">
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-white/3 transition-colors">
                     <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {buyer ? (buyer as any).name : 'Buyer'}
-                      </p>
-                      <p className="text-xs text-gray-400">{product ? (product as any).name : '—'}</p>
+                      <p className="text-sm font-medium text-white/90">{buyer ? (buyer as any).name : 'Buyer'}</p>
+                      <p className="text-xs text-white/35">{product ? (product as any).name : '—'}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-mono font-medium text-gray-700">
-                        {formatCurrency(rfq.currentProposedPrice)}
-                        <span className="text-xs text-gray-400">/u</span>
+                      <span className="text-sm font-mono font-medium text-white/80">
+                        {formatCurrency(rfq.currentProposedPrice)}<span className="text-xs text-white/30">/u</span>
                       </span>
                       <StatusBadge status={rfq.status} />
                     </div>
@@ -99,33 +132,28 @@ export default function SupplierDashboard() {
            )}
         </Card>
 
-        {/* Active POs */}
         <Card padding="none">
           <CardHeader className="px-5 pt-5 pb-0">
             <CardTitle>Active Orders</CardTitle>
-            <Link href="/supplier/purchase-orders" className="text-xs text-indigo-600 hover:underline">View all</Link>
+            <Link href="/supplier/purchase-orders" className="text-xs text-indigo-400 hover:text-indigo-300">View all</Link>
           </CardHeader>
           {loading ? <div className="mt-4"><SkeletonTable rows={3} /></div> :
            !data?.activePOs.length ? (
             <EmptyState icon={<ShoppingBag className="w-5 h-5" />} title="No active orders" />
            ) : (
-            <div className="mt-3 divide-y divide-gray-50">
+            <div className="mt-3 divide-y divide-white/5">
               {data.activePOs.slice(0, 5).map((po) => {
-                const buyer = typeof po.buyerId === 'object' ? po.buyerId : null
+                const buyer    = typeof po.buyerId === 'object' ? po.buyerId : null
                 const deadline = formatDeadline(po.paymentDeadline)
                 return (
                   <Link key={po._id} href={`/supplier/purchase-orders/${po._id}`}
-                    className="flex items-center justify-between px-5 py-3.5 hover:bg-gray-50 transition-colors">
+                    className="flex items-center justify-between px-5 py-3.5 hover:bg-white/3 transition-colors">
                     <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {buyer ? (buyer as any).name : 'Buyer'}
-                      </p>
-                      <p className="text-xs text-gray-400">{deadline.label}</p>
+                      <p className="text-sm font-medium text-white/90">{buyer ? (buyer as any).name : 'Buyer'}</p>
+                      <p className="text-xs text-white/35">{deadline.label}</p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="text-sm font-mono font-medium text-gray-700">
-                        {formatCurrency(po.totalPrice)}
-                      </span>
+                      <span className="text-sm font-mono text-white/80">{formatCurrency(po.totalPrice)}</span>
                       <StatusBadge status={po.fulfilmentStatus} />
                     </div>
                   </Link>
