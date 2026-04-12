@@ -10,23 +10,16 @@ import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
 import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { getUserCompany, requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
 
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
-
 // POST /api/loans — FIX 8: accept tenureMonths or requestedTenureMonths
 export const createLoanApplication = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { loanTypeId, purchaseOrderId, requestedAmount, requestedTenureMonths, tenureMonths, purpose } = req.body
     const resolvedTenure = requestedTenureMonths ?? tenureMonths  // FIX 8
@@ -64,7 +57,8 @@ export const createLoanApplication = async (req: AuthRequest, res: Response): Pr
     AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.create', entityType: 'LoanApplication', entityId: loan._id, timestamp: new Date() }).catch(() => {})
 
     sendSuccess(res, { loan }, undefined, 201)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -72,8 +66,7 @@ export const createLoanApplication = async (req: AuthRequest, res: Response): Pr
 // POST /api/loans/:id/submit
 export const submitLoanApplication = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const loan = await LoanApplication.findOne({ _id: req.params.id, companyId: company._id, isDeleted: false })
     if (!loan) { sendError(res, 'Loan application not found', 404); return }
@@ -86,7 +79,8 @@ export const submitLoanApplication = async (req: AuthRequest, res: Response): Pr
     AuditLog.create({ performedBy: new Types.ObjectId(req.user!.userId), performedByRole: req.user!.role, ipAddress: getIp(req), action: 'loan.update', entityType: 'LoanApplication', entityId: loan._id, changes: { status: { before: 'draft', after: 'submitted' } }, timestamp: new Date() }).catch(() => {})
 
     sendSuccess(res, { loan })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -105,8 +99,7 @@ export const listLoanApplications = async (req: AuthRequest, res: Response): Pro
         filter.assignedUnderwriterId = new Types.ObjectId(req.user!.userId)
       }
     } else {
-      const { company } = await getUserCompany(req.user!.userId)
-      if (!company) { sendError(res, 'No company linked to account', 403); return }
+      const company = await requireUserCompany(req.user!.userId)
       filter.companyId = company._id
       if (status) filter.status = status
     }
@@ -122,7 +115,8 @@ export const listLoanApplications = async (req: AuthRequest, res: Response): Pro
       .limit(pageLimit)
 
     sendPaginated(res, loans, loans.length === pageLimit ? loans[loans.length - 1]._id.toString() : null)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
