@@ -1,20 +1,12 @@
 import { Response } from 'express'
-import { Types } from 'mongoose'
 import PurchaseOrder from '../models/PurchaseOrder'
 import RFQ from '../models/RFQ'
 import Product from '../models/Product'
-import Company from '../models/Company'
 import LoanApplication from '../models/LoanApplication'
 import CreditScore from '../models/CreditScore'
-import User from '../models/User'
 import { sendSuccess, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return null
-  return Company.findOne({ _id: user.companyId, isDeleted: false })
-}
+import { getUserCompany } from '../utils/company'
 
 const scoreTier = (score: number): string => {
   if (score >= 750) return 'Excellent'
@@ -26,13 +18,23 @@ const scoreTier = (score: number): string => {
 // GET /api/buyer/dashboard
 export const getBuyerDashboard = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const company = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const { company, setupRequired } = await getUserCompany(req.user!.userId)
+
+    if (setupRequired || !company) {
+      sendSuccess(res, {
+        setupRequired: true,
+        activePOs: 0,
+        totalOutstanding: 0,
+        nextDeadline: null,
+        creditScore: null,
+        optimizerAlerts: [],
+      })
+      return
+    }
 
     const now = new Date()
     const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
 
-    // Active POs — not paid, not cancelled
     const activePOs = await PurchaseOrder.find({
       buyerId: company._id,
       paymentStatus: { $ne: 'paid' },
@@ -42,7 +44,6 @@ export const getBuyerDashboard = async (req: AuthRequest, res: Response): Promis
 
     const totalOutstanding = activePOs.reduce((sum, po) => sum + po.amountRemaining, 0)
 
-    // Nearest deadline
     const sorted = [...activePOs].sort((a, b) => a.paymentDeadline.getTime() - b.paymentDeadline.getTime())
     const next = sorted[0]
     const nextDeadline = next ? {
@@ -52,7 +53,6 @@ export const getBuyerDashboard = async (req: AuthRequest, res: Response): Promis
       paymentDeadline: next.paymentDeadline.toISOString(),
     } : null
 
-    // Optimizer alerts — due within 7 days
     const optimizerAlerts = activePOs
       .filter(po => po.paymentDeadline <= sevenDaysFromNow)
       .map(po => {
@@ -67,11 +67,11 @@ export const getBuyerDashboard = async (req: AuthRequest, res: Response): Promis
       })
       .sort((a, b) => new Date(a.paymentDeadline).getTime() - new Date(b.paymentDeadline).getTime())
 
-    // Credit score
     const latestScore = await CreditScore.findOne({ companyId: company._id }).sort({ computedAt: -1 })
     const creditScore = latestScore ? { score: latestScore.score, tier: scoreTier(latestScore.score) } : null
 
     sendSuccess(res, {
+      setupRequired: false,
       activePOs: activePOs.length,
       totalOutstanding,
       nextDeadline,
@@ -86,14 +86,30 @@ export const getBuyerDashboard = async (req: AuthRequest, res: Response): Promis
 // GET /api/supplier/dashboard
 export const getSupplierDashboard = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const company = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const { company, setupRequired } = await getUserCompany(req.user!.userId)
+
+    if (setupRequired || !company) {
+      sendSuccess(res, {
+        setupRequired: true,
+        activeListings: 0,
+        pendingRFQs: 0,
+        totalReceivable: 0,
+        averageRating: 0,
+        incomingRFQs: [],
+        activePOs: [],
+      })
+      return
+    }
 
     const [activeListings, pendingRFQs, activePODocs, incomingRFQs] = await Promise.all([
       Product.countDocuments({ supplierId: company._id, isDeleted: false, isAvailable: true }),
       RFQ.countDocuments({ supplierId: company._id, status: 'pending', isDeleted: false }),
-      PurchaseOrder.find({ supplierId: company._id, paymentStatus: { $ne: 'paid' }, status: { $ne: 'cancelled' }, isDeleted: false })
-        .populate('buyerId', 'name logo').populate('productId', 'name').sort({ paymentDeadline: 1 }).limit(5),
+      PurchaseOrder.find({
+        supplierId: company._id,
+        paymentStatus: { $ne: 'paid' },
+        status: { $ne: 'cancelled' },
+        isDeleted: false,
+      }).populate('buyerId', 'name logo').populate('productId', 'name').sort({ paymentDeadline: 1 }).limit(5),
       RFQ.find({ supplierId: company._id, status: 'pending', isDeleted: false })
         .populate('buyerId', 'name logo').populate('productId', 'name').sort({ createdAt: -1 }).limit(5),
     ])
@@ -101,6 +117,7 @@ export const getSupplierDashboard = async (req: AuthRequest, res: Response): Pro
     const totalReceivable = activePODocs.reduce((sum, po) => sum + po.amountRemaining, 0)
 
     sendSuccess(res, {
+      setupRequired: false,
       activeListings,
       pendingRFQs,
       totalReceivable,
@@ -113,7 +130,7 @@ export const getSupplierDashboard = async (req: AuthRequest, res: Response): Pro
   }
 }
 
-// GET /api/underwriter/dashboard
+// GET /api/underwriter/dashboard — no company dependency, unchanged
 export const getUnderwriterDashboard = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const today = new Date()
@@ -128,16 +145,8 @@ export const getUnderwriterDashboard = async (req: AuthRequest, res: Response): 
         .populate('loanTypeId', 'name code')
         .sort({ updatedAt: -1 })
         .limit(10),
-      LoanApplication.countDocuments({
-        status: 'approved',
-        updatedAt: { $gte: today, $lt: tomorrow },
-        isDeleted: false,
-      }),
-      LoanApplication.countDocuments({
-        status: 'rejected',
-        updatedAt: { $gte: today, $lt: tomorrow },
-        isDeleted: false,
-      }),
+      LoanApplication.countDocuments({ status: 'approved', updatedAt: { $gte: today, $lt: tomorrow }, isDeleted: false }),
+      LoanApplication.countDocuments({ status: 'rejected', updatedAt: { $gte: today, $lt: tomorrow }, isDeleted: false }),
     ])
 
     sendSuccess(res, { queueCount, approvedToday, rejectedToday, pendingDocs, queue })
