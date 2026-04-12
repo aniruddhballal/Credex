@@ -2,23 +2,16 @@ import { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import Payment from '../models/Payment'
 import PurchaseOrder from '../models/PurchaseOrder'
-import User from '../models/User'
 import Company from '../models/Company'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
 import { sendSuccess, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
 
 const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.ObjectId | null> => {
   const company = await Company.findById(companyId)
@@ -29,8 +22,7 @@ const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.O
 // POST /api/purchase-orders/:id/payments — FIX 9: accept both reference/referenceNumber
 export const recordPayment = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company: buyerCompany } = await getUserCompany(req.user!.userId)
-    if (!buyerCompany) { sendError(res, 'No company linked to account', 403); return }
+    const buyerCompany = await requireUserCompany(req.user!.userId)
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
     if (!po) { sendError(res, 'Purchase order not found', 404); return }
@@ -80,7 +72,11 @@ export const recordPayment = async (req: AuthRequest, res: Response): Promise<vo
     }
 
     sendSuccess(res, { payment, purchaseOrder: po }, undefined, 201)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) {
+      sendError(res, err.message, err.statusCode)
+      return
+    }
     sendError(res, 'Server error', 500)
   }
 }
@@ -88,8 +84,7 @@ export const recordPayment = async (req: AuthRequest, res: Response): Promise<vo
 // GET /api/purchase-orders/:id/payments
 export const getPaymentsForPO = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
     if (!po) { sendError(res, 'Purchase order not found', 404); return }
@@ -103,7 +98,11 @@ export const getPaymentsForPO = async (req: AuthRequest, res: Response): Promise
       .sort({ paidAt: -1 })
 
     sendSuccess(res, { payments })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) {
+      sendError(res, err.message, err.statusCode)
+      return
+    }
     sendError(res, 'Server error', 500)
   }
 }
