@@ -3,16 +3,8 @@ import { Types } from 'mongoose'
 import ChatMessage from '../models/ChatMessage'
 import RFQ from '../models/RFQ'
 import PurchaseOrder from '../models/PurchaseOrder'
-import User from '../models/User'
-import Company from '../models/Company'
 import { AuthRequest } from '../middleware/auth'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 // Verify sender is a party to the thread
 const verifyAccess = async (
@@ -42,11 +34,7 @@ const verifyAccess = async (
 // POST /api/chat
 export const sendMessage = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { rfqId, purchaseOrderId, message } = req.body
 
@@ -84,7 +72,8 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
     const populated = await chat.populate('senderId', 'firstName lastName')
 
     res.status(201).json({ success: true, message: populated })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { res.status(err.statusCode).json({ success: false, message: err.message }); return }
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
@@ -92,11 +81,7 @@ export const sendMessage = async (req: AuthRequest, res: Response): Promise<void
 // GET /api/chat?rfqId=...  or  ?purchaseOrderId=...
 export const getThread = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) {
-      res.status(403).json({ success: false, message: 'No company linked to account' })
-      return
-    }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { rfqId, purchaseOrderId, lastId, limit = '50' } = req.query
 
@@ -143,7 +128,8 @@ export const getThread = async (req: AuthRequest, res: Response): Promise<void> 
       messages: messages.reverse(), // oldest first
       nextCursor: messages.length === pageLimit ? messages[0]?._id : null,
     })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { res.status(err.statusCode).json({ success: false, message: err.message }); return }
     res.status(500).json({ success: false, message: 'Server error' })
   }
 }
