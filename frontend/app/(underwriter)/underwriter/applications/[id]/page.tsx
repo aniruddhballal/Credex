@@ -85,13 +85,23 @@ export default function UnderwriterApplicationPage() {
     } finally { setSubmitting(false) }
   }
 
+  const [loadingDocId, setLoadingDocId] = useState<string | null>(null)
+
   const openDocument = async (documentId: string, name: string) => {
+    setLoadingDocId(documentId)
+    setDocUrl(null)
     try {
       const res = await underwriterApi.getDocumentUrl(documentId)
       setDocUrl({ url: res.data.data.url, name })
     } catch {
-      toast.error('Could not load document')
+      toast.error('Could not load document. Please try again.')
+    } finally {
+      setLoadingDocId(null)
     }
+  }
+
+  const closeDocument = () => {
+    setDocUrl(null)
   }
 
   if (loading) return <SkeletonCard />
@@ -195,11 +205,15 @@ export default function UnderwriterApplicationPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <StatusBadge status={doc.verificationStatus ?? 'pending'} />
-                      <Button variant="ghost" size="sm"
-                        iconLeft={<ExternalLink className="w-3.5 h-3.5" />}
-                        onClick={() => openDocument(doc._id, doc.fileName)}>
-                        View
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          loading={loadingDocId === doc._id}
+                          iconLeft={<ExternalLink className="w-3.5 h-3.5" />}
+                          onClick={() => openDocument(doc._id, doc.fileName)}
+                        >
+                          View
+                        </Button>
                     </div>
                   </div>
                 ))}
@@ -238,7 +252,7 @@ export default function UnderwriterApplicationPage() {
 
       {/* Document viewer */}
       {docUrl && (
-        <Modal open title={docUrl.name} onClose={() => setDocUrl(null)} size="xl">
+        <Modal open title={docUrl.name} onClose={closeDocument} size="xl">
           <iframe src={docUrl.url} className="w-full h-[70vh] rounded-lg border border-gray-200" />
         </Modal>
       )}
