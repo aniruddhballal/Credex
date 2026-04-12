@@ -9,7 +9,6 @@ import { SkeletonMetricCard, SkeletonTable } from '@/components/ui/Skeleton'
 import { EmptyState } from '@/components/ui/Pagination'
 import { TopBar } from '@/components/shared/Sidebar'
 import { Button } from '@/components/ui/Button'
-import { useFetch } from '@/hooks'
 import { useAuth } from '@/lib/auth-context'
 import { formatCurrency, formatDeadline } from '@/lib/format'
 import type { RFQ, PurchaseOrder } from '@/types'
@@ -26,36 +25,60 @@ interface SupplierDashboardData {
 }
 
 function useSupplierDashboard() {
-  const primary = useFetch<SupplierDashboardData>('/api/supplier/dashboard')
-  const [fallbackData, setFallbackData] = useState<SupplierDashboardData | null>(null)
-  const [fallbackLoading, setFallbackLoading] = useState(false)
+  const { initialized, user } = useAuth()
+
+  const [data, setData] = useState<SupplierDashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [isFallback, setIsFallback] = useState(false)
 
   useEffect(() => {
-    if (!primary.error) return
-    setFallbackLoading(true)
-    Promise.all([
-      api.get('/api/rfqs?role=supplier&status=pending&limit=5'),
-      api.get('/api/purchase-orders?role=supplier&paymentStatus=unpaid,partially_paid&limit=5'),
-      api.get('/api/products/my/listings'),
-    ]).then(([rfqRes, poRes, listingsRes]) => {
-      const rfqs: RFQ[]            = rfqRes.data?.data?.items ?? []
-      const pos: PurchaseOrder[]   = poRes.data?.data?.items ?? []
-      const listings               = listingsRes.data?.data?.items ?? []
-      const totalReceivable        = pos.reduce((sum, po) => sum + po.amountRemaining, 0)
-      setFallbackData({
-        activeListings:  listings.length,
-        pendingRFQs:     rfqs.length,
-        totalReceivable,
-        averageRating:   0,
-        incomingRFQs:    rfqs,
-        activePOs:       pos,
-      })
-    }).catch(console.error)
-      .finally(() => setFallbackLoading(false))
-  }, [primary.error])
+    // ── Wait until auth context has finished hydrating ──────────────────────
+    // Without this guard, requests fire before the access token is in
+    // localStorage, every call gets 403, and the dashboard crashes.
+    if (!initialized || !user) return
 
-  if (!primary.error) return { data: primary.data, loading: primary.loading, isFallback: false }
-  return { data: fallbackData, loading: fallbackLoading, isFallback: true }
+    let cancelled = false
+    setLoading(true)
+
+    // Try the aggregate endpoint first
+    api.get('/api/supplier/dashboard')
+      .then((res) => {
+        if (cancelled) return
+        setData(res.data?.data ?? res.data)
+        setIsFallback(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Aggregate endpoint not live yet — fall back to individual calls
+        setIsFallback(true)
+        Promise.all([
+          api.get('/api/rfqs?role=supplier&status=pending&limit=5'),
+          api.get('/api/purchase-orders?role=supplier&paymentStatus=unpaid,partially_paid&limit=5'),
+          api.get('/api/products/my/listings'),
+        ]).then(([rfqRes, poRes, listingsRes]) => {
+          if (cancelled) return
+          const rfqs: RFQ[]          = rfqRes.data?.data?.items ?? []
+          const pos: PurchaseOrder[] = poRes.data?.data?.items ?? []
+          const listings             = listingsRes.data?.data?.items ?? []
+          const totalReceivable      = pos.reduce((sum, po) => sum + po.amountRemaining, 0)
+          setData({
+            activeListings:  listings.length,
+            pendingRFQs:     rfqs.length,
+            totalReceivable,
+            averageRating:   0,
+            incomingRFQs:    rfqs,
+            activePOs:       pos,
+          })
+        }).catch(console.error)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [initialized, user]) // ← only runs once auth is ready
+
+  return { data, loading, isFallback }
 }
 
 export default function SupplierDashboard() {
