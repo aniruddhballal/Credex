@@ -254,3 +254,46 @@ export interface PaginatedResponse<T> {
   nextCursor?: string
   total?: number
 }
+
+// ── Loan Type (FIX 11) ────────────────────────────────────────────────────────
+
+export interface LoanType {
+  _id: string
+  name: string
+  code: string
+  description?: string
+  minAmount: number         // paise
+  maxAmount: number         // paise
+  minTenureMonths: number
+  maxTenureMonths: number
+  baseInterestRate: number  // % p.a.
+  isActive: boolean
+  createdAt: string
+}
+
+// ── Review ────────────────────────────────────────────────────────────────────
+
+export interface Review {
+  _id: string
+  purchaseOrderId: string
+  reviewType: 'buyer_to_supplier' | 'supplier_to_buyer' | 'buyer_to_product'
+  reviewedByCompanyId: string
+  targetCompanyId?: string
+  targetProductId?: string
+  rating: number            // 1–5
+  comment?: string
+  createdAt: string
+}
+
+// ── Chat Message ──────────────────────────────────────────────────────────────
+
+export interface ChatMessage {
+  _id: string
+  rfqId?: string
+  purchaseOrderId?: string
+  senderId: string
+  senderCompanyId: string
+  message: string
+  isRead: boolean
+  createdAt: string
+}
