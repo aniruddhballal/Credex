@@ -165,3 +165,20 @@ export const underwriterApi = {
   getDocumentUrl: (documentId: string) =>
     api.get<{ data: { url: string } }>(`/api/underwriter/documents/${documentId}/view`),
 }
+
+// ── Loan Types (FIX 7) ────────────────────────────────────────────────────────
+// Fetches available loan types from backend — returns real MongoDB ObjectIds
+// Use loanType._id (not a slug) when creating a LoanApplication
+
+export const loanTypesApi = {
+  getAll: () => api.get<{ data: { items: import('@/types').LoanType[] } }>('/api/admin/loan-types'),
+}
+
+// ── PO create (FIX 8) ─────────────────────────────────────────────────────────
+// Create a Purchase Order from an accepted RFQ.
+// Called by the buyer's RFQ accept flow — NOT by the supplier.
+// Add this to the existing poApi by re-exporting a patched version.
+// Usage: await poApi.create(rfqId)  →  redirects to the new PO
+
+export const createPO = (rfqId: string) =>
+  api.post<{ data: import('@/types').PurchaseOrder }>('/api/purchase-orders', { rfqId })
