@@ -2,24 +2,17 @@ import { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import PurchaseOrder from '../models/PurchaseOrder'
 import RFQ from '../models/RFQ'
-import User from '../models/User'
 import Company from '../models/Company'
 import Product from '../models/Product'
 import AuditLog from '../models/AuditLog'
 import Notification from '../models/Notification'
 import { sendSuccess, sendPaginated, sendError } from '../utils/response'
 import { AuthRequest } from '../middleware/auth'
+import { requireUserCompany, CompanyRequiredError } from '../utils/company'
 
 const getIp = (req: Request): string =>
   ((req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()) ||
   req.socket.remoteAddress || 'unknown'
-
-const getUserCompany = async (userId: string) => {
-  const user = await User.findById(userId)
-  if (!user?.companyId) return { user: null, company: null }
-  const company = await Company.findOne({ _id: user.companyId, isDeleted: false })
-  return { user, company }
-}
 
 const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.ObjectId | null> => {
   const company = await Company.findById(companyId)
@@ -30,8 +23,9 @@ const getCompanyOwnerUserId = async (companyId: Types.ObjectId): Promise<Types.O
 // POST /api/purchase-orders
 export const createPurchaseOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company: buyerCompany } = await getUserCompany(req.user!.userId)
-    if (!buyerCompany || !['buyer', 'both'].includes(buyerCompany.type)) {
+    const buyerCompany = await requireUserCompany(req.user!.userId)
+
+    if (!['buyer', 'both'].includes(buyerCompany.type)) {
       sendError(res, 'Only buyers can create purchase orders', 403); return
     }
 
@@ -74,16 +68,16 @@ export const createPurchaseOrder = async (req: AuthRequest, res: Response): Prom
     }
 
     sendSuccess(res, { purchaseOrder: po }, undefined, 201)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/purchase-orders/:id — FIX 17: full population
+// GET /api/purchase-orders/:id
 export const getPurchaseOrderById = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
       .populate('productId', 'name images category priceUnit basePrice')
@@ -98,16 +92,16 @@ export const getPurchaseOrderById = async (req: AuthRequest, res: Response): Pro
     if (!isBuyer && !isSupplier) { sendError(res, 'You are not a party to this PO', 403); return }
 
     sendSuccess(res, { purchaseOrder: po })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
 
-// GET /api/purchase-orders — FIX 11 + FIX 15
+// GET /api/purchase-orders
 export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { role, status, paymentStatus, lastId, cursor, limit = '20' } = req.query
     const filter: Record<string, unknown> = { isDeleted: false }
@@ -118,7 +112,6 @@ export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promi
 
     if (status) filter.status = status
 
-    // FIX 15 — support comma-separated paymentStatus values
     if (paymentStatus) {
       const statuses = (paymentStatus as string).split(',').map(s => s.trim())
       filter.paymentStatus = statuses.length === 1 ? statuses[0] : { $in: statuses }
@@ -136,7 +129,8 @@ export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promi
       .limit(pageLimit)
 
     sendPaginated(res, pos, pos.length === pageLimit ? pos[pos.length - 1]._id.toString() : null)
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -144,8 +138,7 @@ export const listPurchaseOrders = async (req: AuthRequest, res: Response): Promi
 // PATCH /api/purchase-orders/:id/fulfilment
 export const updateFulfilmentStatus = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const { fulfilmentStatus, note } = req.body
     const validStatuses = ['pending', 'processing', 'shipped', 'delivered', 'completed']
@@ -174,7 +167,8 @@ export const updateFulfilmentStatus = async (req: AuthRequest, res: Response): P
     }
 
     sendSuccess(res, { purchaseOrder: po })
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
@@ -182,8 +176,7 @@ export const updateFulfilmentStatus = async (req: AuthRequest, res: Response): P
 // POST /api/purchase-orders/:id/cancel
 export const cancelPurchaseOrder = async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const { company } = await getUserCompany(req.user!.userId)
-    if (!company) { sendError(res, 'No company linked to account', 403); return }
+    const company = await requireUserCompany(req.user!.userId)
 
     const po = await PurchaseOrder.findOne({ _id: req.params.id, isDeleted: false })
     if (!po) { sendError(res, 'Purchase order not found', 404); return }
@@ -209,7 +202,8 @@ export const cancelPurchaseOrder = async (req: AuthRequest, res: Response): Prom
     }
 
     sendSuccess(res, null, 'Purchase order cancelled')
-  } catch {
+  } catch (err) {
+    if (err instanceof CompanyRequiredError) { sendError(res, err.message, err.statusCode); return }
     sendError(res, 'Server error', 500)
   }
 }
