@@ -42,6 +42,15 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+// ── Role → dashboard route ────────────────────────────────────────────────────
+
+const dashboardRoute: Record<string, string> = {
+  buyer:        '/buyer/dashboard',
+  supplier:     '/supplier/dashboard',
+  underwriter:  '/underwriter/dashboard',
+  system_admin: '/admin/dashboard',
+}
+
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -89,13 +98,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     dispatch({ type: 'SET_USER', payload: user })
 
-    const roleRoutes: Record<string, string> = {
-      buyer: '/buyer/dashboard',
-      supplier: '/supplier/dashboard',
-      underwriter: '/underwriter/dashboard',
-      system_admin: '/admin/dashboard',
+    // ── Onboarding gate ───────────────────────────────────────────────────────
+    // Buyers and suppliers must create a company before accessing the platform.
+    // If companyId is missing after login, send them to the onboarding page.
+    // Underwriters and system_admins skip this — they have no company.
+    const needsOnboarding =
+      !user.companyId &&
+      ['buyer', 'supplier'].includes(user.role)
+
+    if (needsOnboarding) {
+      router.push('/onboarding')
+      return
     }
-    router.push(roleRoutes[user.role] ?? '/')
+
+    router.push(dashboardRoute[user.role] ?? '/')
   }, [router])
 
   const logout = useCallback(async () => {
@@ -105,7 +121,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // best-effort
     } finally {
       tokenStorage.clear()
-      // Clear middleware cookies
       document.cookie = 'credex_role=;path=/;max-age=0'
       document.cookie = 'credex_has_session=;path=/;max-age=0'
       dispatch({ type: 'CLEAR_USER' })
@@ -120,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
-// ── Hook ──────────────────────────────────────────────────────────────────────
+// ── Hooks ─────────────────────────────────────────────────────────────────────
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext)
