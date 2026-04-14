@@ -89,12 +89,15 @@ export default function SupplierListingsPage() {
         />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-          {products.map((product) => (
-            <Card key={product._id} padding="none" className="overflow-hidden">
+          {products.map((product) => {
+            const images = product.images ?? []
+
+            return (
+              <Card key={product._id} padding="none" className="overflow-hidden">
               {/* Image */}
               <div className="relative h-40 bg-gray-100">
-                {product.images[0] ? (
-                  <Image src={product.images[0]} alt={product.name} fill
+                {images[0] ? (
+                  <Image src={images[0]} alt={product.name} fill
                     className="object-cover" sizes="(max-width: 768px) 100vw, 33vw" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-gray-300">
@@ -164,7 +167,8 @@ export default function SupplierListingsPage() {
                 </div>
               </div>
             </Card>
-          ))}
+            )
+          })}
         </div>
       )}
 
