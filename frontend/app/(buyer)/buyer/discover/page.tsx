@@ -217,15 +217,16 @@ export default function DiscoverPage() {
 
 function ProductCard({ product }: { product: Product }) {
   const supplier = typeof product.supplierId === 'object' ? product.supplierId : null
-
+  const images = product.images ?? []
+  const financing = product.acceptedFinancingMethods ?? []
   return (
     <Link href={`/buyer/discover/${product._id}`}>
       <div className="bg-white rounded-xl border border-gray-200 shadow-card hover:shadow-md transition-shadow overflow-hidden group">
         {/* Image */}
         <div className="relative h-44 bg-gray-100 overflow-hidden">
-          {product.images[0] ? (
+          {images[0] ? (
             <Image
-              src={product.images[0]}
+              src={images[0]}
               alt={product.name}
               fill
               className="object-cover group-hover:scale-105 transition-transform duration-300"
@@ -287,16 +288,16 @@ function ProductCard({ product }: { product: Product }) {
           </div>
 
           {/* Financing tags */}
-          {product.acceptedFinancingMethods.length > 0 && (
+          {financing.length > 0 && (
             <div className="flex gap-1 mt-3 overflow-hidden">
-              {product.acceptedFinancingMethods.slice(0, 2).map((m) => (
+              {financing.slice(0, 2).map((m) => (
                 <Badge key={m} variant="muted" className="text-2xs">
                   {m.replace(/_/g, ' ')}
                 </Badge>
               ))}
-              {product.acceptedFinancingMethods.length > 2 && (
+              {financing.length > 2 && (
                 <Badge variant="muted" className="text-2xs">
-                  +{product.acceptedFinancingMethods.length - 2} more
+                    +{financing.length - 2} more
                 </Badge>
               )}
             </div>
