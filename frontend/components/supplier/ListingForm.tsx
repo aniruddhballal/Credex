@@ -146,8 +146,13 @@ export default function ListingForm({ product }: ListingFormProps) {
         await api.patch(`/api/products/${product._id}`, jsonBody)
         productId = product._id
       } else {
-        const res = await api.post<{ data: { _id: string } }>('/api/products', jsonBody)
-        productId = res.data.data._id
+        const res = await api.post('/api/products', jsonBody)
+        productId = res.data.data.product._id
+
+        if (!productId) {
+          console.error("Invalid response:", res.data)
+          throw new Error("Product ID missing")
+        }
       }
 
       // Step 2: Upload each new image separately via /api/images/product/:productId
