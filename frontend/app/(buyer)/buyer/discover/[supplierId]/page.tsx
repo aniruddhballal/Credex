@@ -96,6 +96,7 @@ export default function ProductDetailPage() {
   if (error || !product) return <ErrorState onRetry={() => router.refresh()} />
 
   const supplier = typeof product.supplierId === 'object' ? product.supplierId : null
+  const images = product.images ?? []
 
   return (
     <div>
@@ -108,9 +109,9 @@ export default function ProductDetailPage() {
         {/* Left — images */}
         <div>
           <div className="relative rounded-xl overflow-hidden bg-gray-100 aspect-[4/3]">
-            {product.images[activeImage] ? (
+            {images[activeImage] ? (
               <Image
-                src={product.images[activeImage]}
+                src={images[activeImage]}
                 alt={product.name}
                 fill
                 className="object-cover"
@@ -121,7 +122,7 @@ export default function ProductDetailPage() {
                 <Package className="w-16 h-16" />
               </div>
             )}
-            {product.images.length > 1 && (
+            {images.length > 1 && (
               <>
                 <button
                   onClick={() => setActiveImage((i) => Math.max(0, i - 1))}
@@ -130,7 +131,7 @@ export default function ProductDetailPage() {
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => setActiveImage((i) => Math.min(product.images.length - 1, i + 1))}
+                  onClick={() => setActiveImage((i) => Math.min(images.length - 1, i + 1))}
                   className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-white/80 flex items-center justify-center shadow-sm hover:bg-white"
                 >
                   <ChevronRight className="w-4 h-4" />
@@ -138,15 +139,14 @@ export default function ProductDetailPage() {
               </>
             )}
           </div>
-          {product.images.length > 1 && (
+          {images.length > 1 && (
             <div className="flex gap-2 mt-3">
-              {product.images.map((img, i) => (
+              {images.map((img, i) => (
                 <button
                   key={i}
                   onClick={() => setActiveImage(i)}
-                  className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${
-                    i === activeImage ? 'border-indigo-500' : 'border-transparent'
-                  }`}
+                  className={`w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors ${i === activeImage ? 'border-indigo-500' : 'border-transparent'
+                    }`}
                 >
                   <Image src={img} alt="" width={64} height={64} className="object-cover w-full h-full" />
                 </button>
@@ -179,8 +179,8 @@ export default function ProductDetailPage() {
             </div>
             <div className="flex items-center gap-1 shrink-0">
               <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
-              <span className="text-sm font-medium text-gray-700">{product.averageRating.toFixed(1)}</span>
-              <span className="text-xs text-gray-400">({product.totalReviews})</span>
+              <span className="text-sm font-medium text-gray-700">{(product.averageRating ?? 0).toFixed(1)}</span>
+              <span className="text-xs text-gray-400">({product.totalReviews ?? 0})</span>
             </div>
           </div>
 
@@ -207,7 +207,7 @@ export default function ProductDetailPage() {
                 Accepted financing
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {product.acceptedFinancingMethods.map((m) => (
+                {(product.acceptedFinancingMethods ?? []).map((m) => (
                   <Badge key={m} variant="default" className="text-xs">
                     {m.replace(/_/g, ' ')}
                   </Badge>
@@ -282,7 +282,7 @@ export default function ProductDetailPage() {
           <Select
             label="Financing method"
             options={FINANCING_OPTIONS.filter(o =>
-              product.acceptedFinancingMethods.includes(o.value as any) ||
+              (product.acceptedFinancingMethods ?? []).includes(o.value as any) ||
               o.value === 'open_to_discuss'
             )}
             placeholder="Select financing"
