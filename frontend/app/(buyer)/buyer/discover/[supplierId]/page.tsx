@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { useParams, useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
@@ -51,15 +51,30 @@ export default function ProductDetailPage() {
   const [activeImage, setActiveImage] = useState(0)
   const [submitting, setSubmitting] = useState(false)
 
-  const { data: product, loading, error } = useFetch<Product>(`/api/products/${productId}`)
+  const { data: productResponse, loading, error } = useFetch<{ product: Product }>(`/api/products/${productId}`)
+  const product = productResponse?.product
 
-  const { register, handleSubmit, formState: { errors }, reset } = useForm<RFQForm>({
-    resolver: zodResolver(rfqSchema),
-    defaultValues: {
-      proposedPaymentDeadlineDays: product?.defaultPaymentDeadlineDays ?? 30,
-      proposedPenaltyRate: product?.defaultPenaltyRate ?? 0.05,
-    },
+
+const { register, handleSubmit, formState: { errors }, reset } = useForm<RFQForm>({
+  resolver: zodResolver(rfqSchema),
+  defaultValues: {
+    proposedPaymentDeadlineDays: 30,
+    proposedPenaltyRate: 0.05,
+  },
+})
+
+useEffect(() => {
+  if (!product) return
+
+  reset({
+    proposedPrice: undefined,
+    proposedQuantity: undefined,
+    proposedFinancingMethod: '',
+    proposedPaymentDeadlineDays: product.defaultPaymentDeadlineDays ?? 30,
+    proposedPenaltyRate: product.defaultPenaltyRate ?? 0.05,
+    message: '',
   })
+}, [product, reset])
 
   const onSubmitRFQ = async (data: RFQForm) => {
     if (!product) return
@@ -93,8 +108,9 @@ export default function ProductDetailPage() {
       <SkeletonCard /><SkeletonCard />
     </div>
   )
-  if (error || !product) return <ErrorState onRetry={() => router.refresh()} />
-
+  if (error || !product) {
+    return <ErrorState onRetry={() => router.refresh()} />
+  }
   const supplier = typeof product.supplierId === 'object' ? product.supplierId : null
   const images = product.images ?? []
 
@@ -187,7 +203,7 @@ export default function ProductDetailPage() {
           {/* Price */}
           <div className="mt-5 p-4 bg-gray-50 rounded-xl">
             <p className="text-2xl font-semibold text-gray-900 font-mono">
-              {formatCurrency(product.basePrice)}
+              {formatCurrency(product.basePrice / 100)}
               <span className="text-sm font-normal text-gray-400 ml-1">/ {product.priceUnit}</span>
             </p>
             {product.isNegotiable && (
