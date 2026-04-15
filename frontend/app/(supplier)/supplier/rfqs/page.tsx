@@ -71,8 +71,11 @@ export default function SupplierRFQsPage() {
                     <Td className="text-gray-500 max-w-[140px] truncate">
                       {product ? (product as any).name : '—'}
                     </Td>
-                    <Td className="font-mono">{formatCurrency(rfq.currentProposedPrice)}<span className="text-xs text-gray-400">/u</span></Td>
-                    <Td>{rfq.currentProposedQuantity.toLocaleString('en-IN')}</Td>
+                    <Td className="font-mono">
+                      {rfq.currentProposedPrice != null ? formatCurrency(rfq.currentProposedPrice) : '—'}
+                      <span className="text-xs text-gray-400">/u</span>
+                    </Td>
+                    <Td>{rfq.currentProposedQuantity?.toLocaleString('en-IN') ?? '—'}</Td>
                     <Td><StatusBadge status={rfq.status} /></Td>
                     <Td className="text-xs text-gray-400">{formatRelative(rfq.createdAt)}</Td>
                     <Td>
