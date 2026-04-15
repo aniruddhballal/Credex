@@ -43,7 +43,8 @@ const FINANCING_OPTIONS = [
 ]
 
 export default function SupplierRFQDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = Array.isArray(params.id) ? params.id[0] : params.id
   const router  = useRouter()
   const { user } = useAuth()
   const [submitting, setSubmitting] = useState(false)
@@ -57,7 +58,7 @@ export default function SupplierRFQDetailPage() {
     resolver: zodResolver(counterSchema),
     values: rfq ? {
       proposedPrice:               rfq.currentProposedPrice / 100,
-      proposedQuantity:            rfq.currentProposedQuantity,
+      proposedQuantity:            rfq.currentProposedQuantity ?? 0,
       proposedFinancingMethod:     rfq.currentProposedFinancingMethod,
       proposedPaymentDeadlineDays: rfq.currentProposedPaymentDeadlineDays,
       proposedPenaltyRate:         rfq.currentProposedPenaltyRate,
@@ -108,7 +109,7 @@ export default function SupplierRFQDetailPage() {
   const buyer   = typeof rfq.buyerId   === 'object' ? rfq.buyerId   : null
   const product = typeof rfq.productId === 'object' ? rfq.productId : null
   const canAct  = rfq.status === 'pending' || rfq.status === 'countered'
-  const supplierCompanyId = user?.companyId
+  const supplierCompanyId = (user as any)?.companyId as string | undefined
 
   return (
     <div>
@@ -123,7 +124,7 @@ export default function SupplierRFQDetailPage() {
             </CardHeader>
 
             <div className="space-y-4 mt-2">
-              {rfq.negotiationHistory.map((entry, i) => {
+              {(rfq.negotiationHistory ?? []).map((entry, i) => { 
                 const isMe = entry.proposedBy === supplierCompanyId
                 return (
                   <div key={i} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
@@ -132,7 +133,7 @@ export default function SupplierRFQDetailPage() {
                     </div>
                     <div className={cn(
                       'flex-1 rounded-xl p-3.5 text-sm border',
-                      i === rfq.negotiationHistory.length - 1
+                      i === (rfq.negotiationHistory?.length ?? 0) - 1
                         ? isMe ? 'bg-indigo-50 border-indigo-100' : 'bg-emerald-50 border-emerald-100'
                         : 'bg-gray-50 border-gray-100'
                     )}>
@@ -141,14 +142,14 @@ export default function SupplierRFQDetailPage() {
                         <span className="text-xs text-gray-400">{formatDateTime(entry.timestamp)}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
-                        {[
+                        {([
                           ['Price',    formatCurrency(entry.proposedPrice) + '/u'],
-                          ['Qty',      entry.proposedQuantity.toLocaleString('en-IN')],
-                          ['Total',    formatCurrency(entry.proposedPrice * entry.proposedQuantity)],
-                          ['Financing',humanize(entry.proposedFinancingMethod)],
+                          ['Qty',      (entry.proposedQuantity ?? 0).toLocaleString('en-IN')],
+                          ['Total',    formatCurrency((entry.proposedPrice ?? 0) * (entry.proposedQuantity ?? 0))],
+                          ['Financing',entry.proposedFinancingMethod ? humanize(entry.proposedFinancingMethod) : '—'],
                           ['Terms',    `${entry.proposedPaymentDeadlineDays}d`],
                           ['Penalty',  `${entry.proposedPenaltyRate}%/d`],
-                        ].map(([label, value]) => (
+                        ] as [string, string][]).map(([label, value]) => (
                           <div key={label}>
                             <p className="text-gray-400">{label}</p>
                             <p className="font-medium text-gray-800">{value}</p>
@@ -207,14 +208,14 @@ export default function SupplierRFQDetailPage() {
           <Card>
             <CardHeader><CardTitle>Current Terms</CardTitle></CardHeader>
             <dl className="space-y-2.5 text-sm">
-              {[
+              {([
                 ['Price',         formatCurrency(rfq.currentProposedPrice) + ' / unit'],
-                ['Qty',           rfq.currentProposedQuantity.toLocaleString('en-IN')],
-                ['Total',         formatCurrency(rfq.currentProposedPrice * rfq.currentProposedQuantity)],
-                ['Financing',     humanize(rfq.currentProposedFinancingMethod)],
+                ['Qty',           (rfq.currentProposedQuantity ?? 0).toLocaleString('en-IN')],
+                ['Total',         formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))],
+                ['Financing',     rfq.currentProposedFinancingMethod ? humanize(rfq.currentProposedFinancingMethod) : '—'],
                 ['Terms',         `${rfq.currentProposedPaymentDeadlineDays} days`],
                 ['Penalty',       `${rfq.currentProposedPenaltyRate}% / day`],
-              ].map(([label, value]) => (
+              ] as [string, string][]).map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-2">
                   <dt className="text-gray-400">{label}</dt>
                   <dd className="font-medium text-gray-900 text-right">{value}</dd>
