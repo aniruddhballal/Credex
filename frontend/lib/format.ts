@@ -27,13 +27,15 @@ const inrFormatterDecimal = new Intl.NumberFormat('en-IN', {
 })
 
 /** Format paise as ₹ with Indian numbering. e.g. 250000 → ₹2,500 */
-export function formatCurrency(paise: number, showDecimal = false): string {
+export function formatCurrency(paise: number | undefined | null, showDecimal = false): string {
+  if (paise == null || isNaN(paise)) return '—'
   const rupees = paise / 100
   return showDecimal ? inrFormatterDecimal.format(rupees) : inrFormatter.format(rupees)
 }
 
 /** Compact format for large amounts. e.g. 10000000 paise → ₹1L, 100000000 → ₹1Cr */
-export function formatCurrencyCompact(paise: number): string {
+export function formatCurrencyCompact(paise: number | undefined | null): string {
+  if (paise == null || isNaN(paise)) return '—'
   const rupees = paise / 100
   if (rupees >= 1_00_00_000) return `₹${(rupees / 1_00_00_000).toFixed(1)}Cr`
   if (rupees >= 1_00_000) return `₹${(rupees / 1_00_000).toFixed(1)}L`
@@ -42,34 +44,43 @@ export function formatCurrencyCompact(paise: number): string {
 }
 
 /** Raw rupee number with Indian commas, no ₹ symbol */
-export function formatNumber(rupees: number): string {
+export function formatNumber(rupees: number | undefined | null): string {
+  if (rupees == null || isNaN(rupees)) return '—'
   return new Intl.NumberFormat('en-IN').format(rupees)
 }
 
 // ── Dates ─────────────────────────────────────────────────────────────────────
 
 /** e.g. "14 Apr 2026" */
-export function formatDate(date: string | Date): string {
-  return format(new Date(date), 'd MMM yyyy')
+export function formatDate(date: string | Date | undefined | null): string {
+  if (!date) return '—'
+  const d = new Date(date)
+  return isNaN(d.getTime()) ? '—' : format(d, 'd MMM yyyy')
 }
 
 /** e.g. "14 Apr 2026, 3:45 PM" */
-export function formatDateTime(date: string | Date): string {
-  return format(new Date(date), 'd MMM yyyy, h:mm a')
+export function formatDateTime(date: string | Date | undefined | null): string {
+  if (!date) return '—'
+  const d = new Date(date)
+  return isNaN(d.getTime()) ? '—' : format(d, 'd MMM yyyy, h:mm a')
 }
 
 /** Human-relative time. e.g. "2 hours ago", "in 3 days" */
-export function formatRelative(date: string | Date): string {
-  return formatDistanceToNow(new Date(date), { addSuffix: true })
+export function formatRelative(date: string | Date | undefined | null): string {
+  if (!date) return '—'
+  const d = new Date(date)
+  return isNaN(d.getTime()) ? '—' : formatDistanceToNow(d, { addSuffix: true })
 }
 
 /** Deadline-aware label. e.g. "Today", "Tomorrow", "3 days left", "2 days overdue" */
 // Thresholds: ≤0 overdue, 1–3 high, 4–7 medium, >7 low
-export function formatDeadline(deadline: string | Date): {
+export function formatDeadline(deadline: string | Date | undefined | null): {
   label: string;
   urgency: 'overdue' | 'high' | 'medium' | 'low'
 } {
+  if (!deadline) return { label: '—', urgency: 'low' }
   const d = new Date(deadline)
+  if (isNaN(d.getTime())) return { label: '—', urgency: 'low' }
   const now = new Date()
   const daysLeft = Math.ceil((d.getTime() - now.getTime()) / 86_400_000)
 
@@ -95,16 +106,19 @@ export function scoreTierColor(tier: string): string {
 // ── Misc ──────────────────────────────────────────────────────────────────────
 
 /** Truncate long strings with ellipsis */
-export function truncate(str: string, maxLen = 40): string {
+export function truncate(str: string | undefined | null, maxLen = 40): string {
+  if (!str) return '—'
   return str.length > maxLen ? str.slice(0, maxLen) + '…' : str
 }
 
 /** Capitalise first letter */
-export function capitalize(str: string): string {
+export function capitalize(str: string | undefined | null): string {
+  if (!str) return '—'
   return str.charAt(0).toUpperCase() + str.slice(1)
 }
 
 /** e.g. 'buyer_to_supplier' → 'Buyer to Supplier' */
-export function humanize(str: string): string {
+export function humanize(str: string | undefined | null): string {
+  if (!str) return '—'
   return str.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
 }
