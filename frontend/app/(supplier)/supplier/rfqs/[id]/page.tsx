@@ -57,11 +57,11 @@ export default function SupplierRFQDetailPage() {
   const { register, handleSubmit, formState: { errors }, reset } = useForm<CounterForm>({
     resolver: zodResolver(counterSchema),
     values: rfq ? {
-      proposedPrice:               rfq.currentProposedPrice / 100,
-      proposedQuantity:            rfq.currentProposedQuantity ?? 0,
-      proposedFinancingMethod:     rfq.currentProposedFinancingMethod,
-      proposedPaymentDeadlineDays: rfq.currentProposedPaymentDeadlineDays,
-      proposedPenaltyRate:         rfq.currentProposedPenaltyRate,
+      proposedPrice:               rfq.currentPrice / 100,
+      proposedQuantity:            rfq.currentQuantity ?? 0,
+      proposedFinancingMethod:     rfq.currentFinancingMethod,
+      proposedPaymentDeadlineDays: rfq.currentPaymentDeadlineDays,
+      proposedPenaltyRate:         rfq.currentPenaltyRate,
       message: '',
     } : undefined,
   })
@@ -109,7 +109,6 @@ export default function SupplierRFQDetailPage() {
   const buyer   = typeof rfq.buyerId   === 'object' ? rfq.buyerId   : null
   const product = typeof rfq.productId === 'object' ? rfq.productId : null
   const canAct  = rfq.status === 'pending' || rfq.status === 'countered'
-  const supplierCompanyId = (user as any)?.companyId as string | undefined
 
   return (
     <div>
@@ -124,8 +123,8 @@ export default function SupplierRFQDetailPage() {
             </CardHeader>
 
             <div className="space-y-4 mt-2">
-              {(rfq.negotiationHistory ?? []).map((entry, i) => { 
-                const isMe = entry.proposedBy === supplierCompanyId
+              {(rfq.history ?? []).map((entry, i) => { 
+                const isMe = entry.by === 'supplier'
                 return (
                   <div key={i} className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-white shrink-0 mt-0.5 ${isMe ? 'bg-indigo-500' : 'bg-gray-400'}`}>
@@ -133,13 +132,13 @@ export default function SupplierRFQDetailPage() {
                     </div>
                     <div className={cn(
                       'flex-1 rounded-xl p-3.5 text-sm border',
-                      i === (rfq.negotiationHistory?.length ?? 0) - 1
+                      i === (rfq.history?.length ?? 0) - 1
                         ? isMe ? 'bg-indigo-50 border-indigo-100' : 'bg-emerald-50 border-emerald-100'
                         : 'bg-gray-50 border-gray-100'
                     )}>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-xs font-semibold text-gray-600">{isMe ? 'You' : 'Buyer'}</span>
-                        <span className="text-xs text-gray-400">{formatDateTime(entry.timestamp)}</span>
+                        <span className="text-xs text-gray-400">{formatDateTime(entry.at)}</span>
                       </div>
                       <div className="grid grid-cols-3 gap-2 text-xs">
                         {([
@@ -209,12 +208,12 @@ export default function SupplierRFQDetailPage() {
             <CardHeader><CardTitle>Current Terms</CardTitle></CardHeader>
             <dl className="space-y-2.5 text-sm">
               {([
-                ['Price',         formatCurrency(rfq.currentProposedPrice) + ' / unit'],
-                ['Qty',           (rfq.currentProposedQuantity ?? 0).toLocaleString('en-IN')],
-                ['Total',         formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))],
-                ['Financing',     rfq.currentProposedFinancingMethod ? humanize(rfq.currentProposedFinancingMethod) : '—'],
-                ['Terms',         `${rfq.currentProposedPaymentDeadlineDays} days`],
-                ['Penalty',       `${rfq.currentProposedPenaltyRate}% / day`],
+                ['Price',         formatCurrency(rfq.currentPrice) + ' / unit'],
+                ['Qty',           (rfq.currentQuantity ?? 0).toLocaleString('en-IN')],
+                ['Total',         formatCurrency((rfq.currentPrice ?? 0) * (rfq.currentQuantity ?? 0))],
+                ['Financing',     rfq.currentFinancingMethod ? humanize(rfq.currentFinancingMethod) : '—'],
+                ['Terms',         `${rfq.currentPaymentDeadlineDays} days`],
+                ['Penalty',       `${rfq.currentPenaltyRate}% / day`],
               ] as [string, string][]).map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-2">
                   <dt className="text-gray-400">{label}</dt>
