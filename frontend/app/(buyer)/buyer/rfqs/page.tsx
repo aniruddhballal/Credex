@@ -42,7 +42,8 @@ const FINANCING_OPTIONS = [
 ]
 
 export default function RFQDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const params = useParams<{ id: string }>()
+  const id = Array.isArray(params.id) ? params.id[0] : params.id
   const router = useRouter()
   const { user } = useAuth()
   const [submitting, setSubmitting] = useState(false)
@@ -56,7 +57,7 @@ export default function RFQDetailPage() {
     resolver: zodResolver(counterSchema),
     values: rfq ? {
       proposedPrice: rfq.currentProposedPrice / 100,
-      proposedQuantity: rfq.currentProposedQuantity,
+      proposedQuantity: rfq.currentProposedQuantity ?? 0,
       proposedFinancingMethod: rfq.currentProposedFinancingMethod,
       proposedPaymentDeadlineDays: rfq.currentProposedPaymentDeadlineDays,
       proposedPenaltyRate: rfq.currentProposedPenaltyRate,
@@ -111,7 +112,6 @@ export default function RFQDetailPage() {
   }
 
   const canAct = rfq && (rfq.status === 'pending' || rfq.status === 'countered')
-  const isBuyer = user?.role === 'buyer'
 
   if (loading) return <SkeletonCard />
   if (error || !rfq) return <ErrorState onRetry={refetch} />
@@ -215,14 +215,14 @@ export default function RFQDetailPage() {
           <Card>
             <CardHeader><CardTitle>Current Terms</CardTitle></CardHeader>
             <dl className="space-y-2.5 text-sm">
-              {[
+              {([
                 ['Price', formatCurrency(rfq.currentProposedPrice) + ' / unit'],
-                ['Quantity', rfq.currentProposedQuantity.toLocaleString('en-IN')],
-                ['Total value', formatCurrency(rfq.currentProposedPrice * rfq.currentProposedQuantity)],
+                ['Quantity', (rfq.currentProposedQuantity ?? 0).toLocaleString('en-IN')],
+                ['Total value', formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))],
                 ['Financing', humanize(rfq.currentProposedFinancingMethod)],
                 ['Payment terms', `${rfq.currentProposedPaymentDeadlineDays} days`],
                 ['Penalty rate', `${rfq.currentProposedPenaltyRate}% / day`],
-              ].map(([label, value]) => (
+              ] as [string, string][]).map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-2">
                   <dt className="text-gray-400">{label}</dt>
                   <dd className="font-medium text-gray-900 text-right">{value}</dd>
@@ -267,7 +267,7 @@ export default function RFQDetailPage() {
         onConfirm={handleAccept}
         loading={submitting}
         title="Accept these terms?"
-        message={`This will create a Purchase Order for ${formatCurrency(rfq.currentProposedPrice * rfq.currentProposedQuantity)}. This cannot be undone.`}
+        message={`This will create a Purchase Order for ${formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))}. This cannot be undone.`}
         confirmLabel="Yes, accept"
       />
       <ConfirmModal
@@ -312,14 +312,14 @@ function NegotiationCard({
           <span className="text-xs text-gray-400">{formatDateTime(entry.timestamp)}</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-          {[
+          {([
             ['Price', formatCurrency(entry.proposedPrice) + '/unit'],
             ['Qty', entry.proposedQuantity.toLocaleString('en-IN')],
             ['Total', formatCurrency(entry.proposedPrice * entry.proposedQuantity)],
             ['Financing', humanize(entry.proposedFinancingMethod)],
             ['Terms', `${entry.proposedPaymentDeadlineDays}d`],
             ['Penalty', `${entry.proposedPenaltyRate}%/d`],
-          ].map(([label, value]) => (
+          ] as [string, string][]).map(([label, value]) => (
             <div key={label}>
               <p className="text-gray-400">{label}</p>
               <p className="font-medium text-gray-800">{value}</p>
