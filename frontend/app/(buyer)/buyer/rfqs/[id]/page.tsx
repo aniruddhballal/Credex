@@ -56,11 +56,11 @@ export default function RFQDetailPage() {
   const { register, handleSubmit, formState: { errors }, reset } = useForm<CounterForm>({
     resolver: zodResolver(counterSchema),
     values: rfq ? {
-      proposedPrice:               rfq.currentProposedPrice / 100,
-      proposedQuantity:            rfq.currentProposedQuantity ?? 0,
-      proposedFinancingMethod:     rfq.currentProposedFinancingMethod,
-      proposedPaymentDeadlineDays: rfq.currentProposedPaymentDeadlineDays,
-      proposedPenaltyRate:         rfq.currentProposedPenaltyRate,
+      proposedPrice:               rfq.currentPrice / 100,
+      proposedQuantity:            rfq.currentQuantity ?? 0,
+      proposedFinancingMethod:     rfq.currentFinancingMethod,
+      proposedPaymentDeadlineDays: rfq.currentPaymentDeadlineDays,
+      proposedPenaltyRate:         rfq.currentPenaltyRate,
       message:                     '',
     } : undefined,
   })
@@ -139,11 +139,11 @@ export default function RFQDetailPage() {
             </CardHeader>
 
             <div className="space-y-4 mt-2">
-              {(rfq.negotiationHistory ?? []).map((entry, i) => (
+              {(rfq.history ?? []).map((entry, i) => (
                 <NegotiationCard
                   key={i}
                   entry={entry}
-                  isLatest={i === (rfq.negotiationHistory?.length ?? 0) - 1}
+                  isLatest={i === (rfq.history?.length ?? 0) - 1}
                   buyerCompanyId={typeof rfq.buyerId === 'string' ? rfq.buyerId : (rfq.buyerId as any)?._id}
                 />
               ))}
@@ -219,12 +219,12 @@ export default function RFQDetailPage() {
             <CardHeader><CardTitle>Current Terms</CardTitle></CardHeader>
             <dl className="space-y-2.5 text-sm">
               {([
-                ['Price',         formatCurrency(rfq.currentProposedPrice) + ' / unit'],
-                ['Quantity',      rfq.currentProposedQuantity?.toLocaleString('en-IN') ?? '-'],
-                ['Total value',   formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))],
-                ['Financing',     humanize(rfq.currentProposedFinancingMethod ?? '-')],
-                ['Payment terms', `${rfq.currentProposedPaymentDeadlineDays ?? '-'} days`],
-                ['Penalty rate',  `${rfq.currentProposedPenaltyRate ?? 0}% / day`],
+                ['Price',         formatCurrency(rfq.currentPrice) + ' / unit'],
+                ['Quantity',      rfq.currentQuantity?.toLocaleString('en-IN') ?? '-'],
+                ['Total value',   formatCurrency((rfq.currentPrice ?? 0) * (rfq.currentQuantity ?? 0))],
+                ['Financing',     humanize(rfq.currentFinancingMethod ?? '-')],
+                ['Payment terms', `${rfq.currentPaymentDeadlineDays ?? '-'} days`],
+                ['Penalty rate',  `${rfq.currentPenaltyRate ?? 0}% / day`],
               ] as [string, string][]).map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-2">
                   <dt className="text-gray-400">{label}</dt>
@@ -270,7 +270,7 @@ export default function RFQDetailPage() {
         onConfirm={handleAccept}
         loading={submitting}
         title="Accept these terms?"
-        message={`This will create a Purchase Order for ${formatCurrency((rfq.currentProposedPrice ?? 0) * (rfq.currentProposedQuantity ?? 0))}. This cannot be undone.`}
+        message={`This will create a Purchase Order for ${formatCurrency((rfq.currentPrice ?? 0) * (rfq.currentQuantity ?? 0))}. This cannot be undone.`}
         confirmLabel="Yes, accept"
       />
       <ConfirmModal
@@ -296,7 +296,7 @@ function NegotiationCard({
   isLatest: boolean
   buyerCompanyId?: string
 }) {
-  const isMe = entry.proposedBy === buyerCompanyId
+  const isMe = entry.by === buyerCompanyId
 
   return (
     <div className={`flex gap-3 ${isMe ? 'flex-row-reverse' : ''}`}>
@@ -314,7 +314,7 @@ function NegotiationCard({
           <span className="text-xs font-semibold text-gray-600">
             {isMe ? 'You' : 'Supplier'}
           </span>
-          <span className="text-xs text-gray-400">{formatDateTime(entry.timestamp)}</span>
+          <span className="text-xs text-gray-400">{formatDateTime(entry.at)}</span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
           {([
