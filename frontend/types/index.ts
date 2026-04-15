@@ -84,15 +84,15 @@ export interface Product {
 export type RFQStatus = 'pending' | 'countered' | 'accepted' | 'declined' | 'expired'
 
 export interface NegotiationEntry {
-  proposedBy: string
-  role: 'buyer' | 'supplier'
+  by: 'buyer' | 'supplier'
+  byUserId: string
   proposedPrice: number
   proposedQuantity: number
   proposedFinancingMethod: FinancingMethod
   proposedPaymentDeadlineDays: number
   proposedPenaltyRate: number
   message?: string
-  timestamp: string
+  at: string
 }
 
 export interface RFQ {
@@ -100,13 +100,18 @@ export interface RFQ {
   buyerId: string | Company
   supplierId: string | Company
   productId: string | Product
+  buyerUserId: string
   status: RFQStatus
-  currentProposedPrice: number
-  currentProposedQuantity: number
-  currentProposedFinancingMethod: FinancingMethod
-  currentProposedPaymentDeadlineDays: number
-  currentProposedPenaltyRate: number
-  negotiationHistory: NegotiationEntry[]
+  currentPrice: number
+  currentQuantity: number
+  currentFinancingMethod: FinancingMethod
+  currentPaymentDeadlineDays: number
+  currentPenaltyRate: number
+  lastMovedBy: 'buyer' | 'supplier'
+  lastMovedAt: string
+  history: NegotiationEntry[]
+  note?: string
+  isDeleted: boolean
   expiresAt?: string
   createdAt: string
   updatedAt: string
