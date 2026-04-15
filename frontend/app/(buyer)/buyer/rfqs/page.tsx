@@ -103,9 +103,9 @@ export default function BuyerRFQsPage() {
                       {formatCurrency(rfq.currentProposedPrice)}
                       <span className="text-xs text-gray-400 ml-1">/ unit</span>
                     </Td>
-                    <Td>{rfq.currentProposedQuantity.toLocaleString('en-IN')}</Td>
+                    <Td>{rfq.currentProposedQuantity?.toLocaleString('en-IN') ?? '—'}</Td>
                     <Td className="text-gray-500">
-                      {rfq.currentProposedFinancingMethod.replace(/_/g, ' ')}
+                      {rfq.currentProposedFinancingMethod?.replace(/_/g, ' ') ?? '—'}
                     </Td>
                     <Td><StatusBadge status={rfq.status} /></Td>
                     <Td className="text-gray-400 text-xs">{formatRelative(rfq.updatedAt)}</Td>
