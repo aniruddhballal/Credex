@@ -84,7 +84,8 @@ interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status, className }: StatusBadgeProps) {
+  if (!status) return <Badge variant="muted" dot className={className}>Unknown</Badge>
   const variant = statusMap[status] ?? 'muted'
   const label = status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  return <Badge variant={ variant } dot className = { className } > { label } </Badge>
+  return <Badge variant={variant} dot className={className}>{label}</Badge>
 }
